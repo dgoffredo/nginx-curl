@@ -1,6 +1,12 @@
 #include "pool.h"
 
+#include <array> // std::size
+#include <cassert>
+#include <cstdlib>
+#include <cstring>
+#include <new>
 #include <ostream>
+#include <stdexcept>
 
 Pool::BlockHeader::BlockHeader(std::size_t log2_size)
     : next(nullptr), log2_size(log2_size) {}

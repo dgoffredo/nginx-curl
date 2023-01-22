@@ -2,17 +2,10 @@
 
 // It doesn't do much.
 
-// TODO: most of these headers can move into the .cpp
-#include <array> // std::size
 #include <atomic>
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
-#include <cstring>
 #include <iosfwd>
-#include <new>
-#include <stdexcept>
 
 class Pool {
   struct alignas(std::max_align_t) BlockHeader {
