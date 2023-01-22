@@ -66,7 +66,7 @@ void *Pool::allocate_impl(std::size_t size, bool zeroed) {
     return nullptr;
   }
 
-  if (size > (1ULL << std::size(pools))) {
+  if (size > (1ULL << (std::size(pools) - 1))) {
     throw std::bad_alloc();
   }
 
