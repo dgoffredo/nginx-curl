@@ -1,5 +1,7 @@
 #include "pool.h"
 
+#include <ostream>
+
 Pool::BlockHeader::BlockHeader(std::size_t log2_size)
     : next(nullptr), log2_size(log2_size) {}
 
@@ -103,6 +105,7 @@ void *Pool::reallocate(void *pointer, std::size_t new_size) {
 
   auto result = allocate(new_size);
   std::memcpy(result, pointer, old_size);
+  free(pointer);
   return result;
 }
 
@@ -111,4 +114,29 @@ void Pool::free(void *pointer) {
     return;
   }
   put_block(block_cast(pointer));
+}
+
+char *Pool::duplicate(const char *string) {
+  auto length = std::strlen(string);
+  auto memory = allocate(length + 1);
+  char *bytes = static_cast<char *>(memory);
+  std::memcpy(bytes, string, length + 1);
+  return bytes;
+}
+
+void Pool::debug(std::ostream &log) const {
+  for (std::size_t i = 0; i < std::size(pools); ++i) {
+    auto node = pools[i].load();
+    if (!node) {
+      continue;
+    }
+    log << i << ": ";
+    do {
+      auto address = static_cast<void *>(
+          static_cast<char *>(static_cast<void *>(node)) + sizeof(BlockHeader));
+      log << address << " -> ";
+      node = node->next;
+    } while (node);
+    log << "nullptr\n";
+  }
 }

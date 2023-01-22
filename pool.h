@@ -2,6 +2,7 @@
 
 // It doesn't do much.
 
+// TODO: most of these headers can move into the .cpp
 #include <array> // std::size
 #include <atomic>
 #include <cassert>
@@ -9,6 +10,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <iosfwd>
 #include <new>
 #include <stdexcept>
 
@@ -37,4 +39,7 @@ public:
   void *callocate(std::size_t count, std::size_t size_each);
   void *reallocate(void *pointer, std::size_t new_size);
   void free(void *pointer);
+  char *duplicate(const char *string);
+
+  void debug(std::ostream &) const;
 };
