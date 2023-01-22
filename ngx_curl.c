@@ -59,16 +59,101 @@ struct ngx_curl_s {
   ngx_curl_allocator_t *allocator;
   CURLM *multi;
   ngx_event_t timeout;
-  void (*on_error)(CURL *, CURLcode);
-  void (*on_done)(CURL *);
 };
 
-// TODO: document
+typedef struct ngx_curl_handle_context_s {
+  void (*on_error)(CURL *, CURLcode), void (*on_done)(CURL *);
+  // `user_data` is whatever was installed as the handle's "private" data
+  // before we replaced it with this object.
+  void *user_data;
+} ngx_curl_handle_context_t;
+
 static int on_register_event(CURL *easy, curl_socket_t s, int what,
                              void *user_data, void *socket_context) {
+  assert(user_data);
   ngx_curl_t *curl = user_data;
-  // TODO
-  return 0;
+
+  ngx_connection_t *connection;
+  if (socket_context == NULL) {
+    // This socket (`s`) is new to us. Get an nginx connection for it and
+    // associate that connection with the socket.
+    connection = ngx_get_connection(s, ngx_cycle->log);
+    if (connection == NULL) {
+      // Returning -1 from this function screws up the whole multi-handle, but
+      // what else can we do? Nginx has probably hit its connection limit.
+      return -1;
+    }
+    CURLMcode mrc = curl_multi_assign(curl->multi, s, connection);
+    if (mrc != CURLM_OK) {
+      // TODO: log with ngx_cycle->log
+      return -1;
+    }
+    ngx_int_t rc = ngx_add_conn(connection);
+    if (rc != NGX_OK) {
+      return -1;
+    }
+  } else {
+    connection = socket_context;
+  }
+
+  /* `what` values, from the curl docs:
+
+  CURL_POLL_IN
+  Wait for incoming data. For the socket to become readable.
+
+  CURL_POLL_OUT
+  Wait for outgoing data. For the socket to become writable.
+
+  CURL_POLL_INOUT
+  Wait for incoming and outgoing data. For the socket to become readable or
+  writable.
+
+  CURL_POLL_REMOVE
+  The specified socket/file descriptor is no longer used by libcurl for any
+  active transfer. It might soon be added again.
+  */
+
+  switch (what) {
+  case CURL_POLL_IN:
+    if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
+      return -1;
+    }
+    if (ngx_del_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
+      return -1;
+    }
+    break;
+  case CURL_POLL_OUT:
+    if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
+      return -1;
+    }
+    if (ngx_del_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
+      return -1;
+    }
+    break;
+  case CURL_POLL_INOUT:
+    if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
+      return -1;
+    }
+    if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
+      return -1;
+    }
+    break;
+  case CURL_POLL_REMOVE: {
+    if (ngx_del_conn(connection, NGX_CLOSE_EVENT) != NGX_OK) {
+      return -1;
+    }
+    CURLMcode mrc = curl_multi_assign(curl->multi, s, NULL);
+    if (mrc != CURLM_OK) {
+      // TODO: log with ngx_cycle->log
+      return -1;
+    }
+  } break;
+  default:
+    // TODO: log with ngx_cycle->log
+    return -1;
+  }
+
+  return 0; // success
 }
 
 ngx_curl_t *ngx_create_curl(ngx_curl_allocation_policy_t policy) {
@@ -102,9 +187,6 @@ ngx_curl_t *ngx_create_curl(ngx_curl_allocation_policy_t policy) {
     abort(); // TODO
     return NULL;
   }
-
-  curl->on_error = on_error;
-  curl->on_done = on_done;
 
   CURLMcode mrc = curl_multi_setopt(curl->multi, CURLMOPT_SOCKETFUNCTION,
                                     on_register_event);
