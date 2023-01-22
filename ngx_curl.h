@@ -66,8 +66,8 @@ ngx_curl_t *ngx_create_curl(ngx_curl_allocation_policy_t);
 
 void ngx_destroy_curl(ngx_curl_t *);
 
-ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
-                    void (*on_error)(CURL *, CURLcode),
-                    void (*on_done)(CURL *));
+ngx_int_t ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
+                              void (*on_error)(CURL *, CURLcode),
+                              void (*on_done)(CURL *));
 
-ngx_curl_remove_handle(ngx_curl_t *curl, CURL *handle);
+ngx_int_t ngx_curl_remove_handle(ngx_curl_t *curl, CURL *handle);

@@ -62,14 +62,27 @@ struct ngx_curl_s {
 };
 
 typedef struct ngx_curl_handle_context_s {
-  void (*on_error)(CURL *, CURLcode), void (*on_done)(CURL *);
+  void (*on_error)(CURL *, CURLcode);
+  void (*on_done)(CURL *);
   // `user_data` is whatever was installed as the handle's "private" data
   // before we replaced it with this object.
   void *user_data;
 } ngx_curl_handle_context_t;
 
+static void on_connection_event(ngx_event_t *event) {
+  assert(event);
+  ngx_connection_t *connection = event->data;
+  assert(connection);
+  ngx_curl_t *curl = connection->data;
+  assert(curl);
+
+  // TODO: call the multi handle's "action" and then handle any messages.
+  // This can be factored into a function.
+}
+
 static int on_register_event(CURL *easy, curl_socket_t s, int what,
                              void *user_data, void *socket_context) {
+  assert(easy);
   assert(user_data);
   ngx_curl_t *curl = user_data;
 
@@ -83,6 +96,12 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
       // what else can we do? Nginx has probably hit its connection limit.
       return -1;
     }
+
+    // `on_connection_event` will dig this value out via `event->data->data`.
+    connection->data = curl;
+
+    // Associate the connection with the socket. That will be `socket_context`
+    // the next time libcurl calls us about this socket (`s`).
     CURLMcode mrc = curl_multi_assign(curl->multi, s, connection);
     if (mrc != CURLM_OK) {
       // TODO: log with ngx_cycle->log
@@ -115,6 +134,7 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
 
   switch (what) {
   case CURL_POLL_IN:
+    connection->read->handler = &on_connection_event;
     if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
       return -1;
     }
@@ -123,6 +143,7 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
     }
     break;
   case CURL_POLL_OUT:
+    connection->write->handler = &on_connection_event;
     if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
       return -1;
     }
@@ -131,9 +152,11 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
     }
     break;
   case CURL_POLL_INOUT:
+    connection->read->handler = &on_connection_event;
     if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
       return -1;
     }
+    connection->write->handler = &on_connection_event;
     if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
       return -1;
     }
@@ -152,6 +175,9 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
     // TODO: log with ngx_cycle->log
     return -1;
   }
+
+  // TODO: Call the multi handle's "action" function, and then check for
+  // messages. This can be factored into a function.
 
   return 0; // success
 }
@@ -194,6 +220,8 @@ ngx_curl_t *ngx_create_curl(ngx_curl_allocation_policy_t policy) {
   mrc = curl_multi_setopt(curl->multi, CURLMOPT_SOCKETDATA, curl);
   assert(mrc == CURLM_OK); // that's what the docs say
 
+  // TODO: Set the timer function, too.
+
   return curl;
 }
 
@@ -209,12 +237,78 @@ void ngx_destroy_curl(ngx_curl_t *curl) {
   curl->allocator->free(curl);
 }
 
-ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
-                    void (*on_error)(CURL *, CURLcode),
-                    void (*on_done)(CURL *)) {
-  // TODO
+ngx_int_t ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
+                              void (*on_error)(CURL *, CURLcode),
+                              void (*on_done)(CURL *)) {
+  assert(curl);
+  assert(handle);
+  assert(on_error);
+  assert(on_done);
+  assert(curl->multi);
+  assert(curl->allocator);
+
+  ngx_curl_handle_context_t *context =
+      curl->allocator->callocate(1, sizeof(ngx_curl_handle_context_t));
+  context->on_error = on_error;
+  context->on_done = on_done;
+
+  CURLcode rc =
+      curl_easy_getinfo(handle, CURLINFO_PRIVATE, &context->user_data);
+  if (rc != CURLE_OK) {
+    // TODO: log to ngx_cycle->log
+    curl->allocator->free(context);
+    return -1;
+  }
+
+  rc = curl_easy_setopt(handle, CURLOPT_PRIVATE, context);
+  if (rc != CURLE_OK) {
+    // TODO: log to ngx_cycle->log
+    curl->allocator->free(context);
+    return -2;
+  }
+
+  // TODO: resolve the host in the URL using nginx's async resolver and set the
+  // result as CURLOPT_RESOLVE on the handle.
+
+  CURLMcode mrc = curl_multi_add_handle(curl->multi, handle);
+  if (mrc != CURLM_OK) {
+    // TODO: log to ngx_cycle->log
+    (void)curl_easy_setopt(handle, CURLOPT_PRIVATE, context->user_data);
+    curl->allocator->free(context);
+    return -3;
+  }
+
+  return 0;
 }
 
-ngx_curl_remove_handle(ngx_curl_t *curl, CURL *handle) {
-  // TODO
+ngx_int_t ngx_curl_remove_handle(ngx_curl_t *curl, CURL *handle) {
+  assert(curl);
+  assert(handle);
+  assert(curl->multi);
+  assert(curl->allocator);
+
+  // Goals:
+  // - Restore the user_data associated with handle.
+  // - Delete the context associated with handle.
+  // - Remove handle from curl->multi.
+
+  ngx_curl_handle_context_t *context;
+  CURLcode rc = curl_easy_getinfo(handle, CURLINFO_PRIVATE, &context);
+  if (rc != CURLE_OK) {
+    // TODO: log to ngx_cycle->log
+    return -1;
+  }
+
+  rc = curl_easy_setopt(handle, CURLOPT_PRIVATE, context->user_data);
+  curl->allocator->free(context);
+  if (rc != CURLE_OK) {
+    // TODO: log to ngx_cycle->log. And careful, `context` is already deleted.
+    return -2;
+  }
+
+  CURLMcode mrc = curl_multi_remove_handle(curl->multi, handle);
+  if (mrc != CURLM_OK) {
+    // TODO: log to ngx_cycle->log
+    return -3;
+  }
 }
