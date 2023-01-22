@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <new>
+#include <stdexcept>
 
 class Pool {
   struct alignas(std::max_align_t) BlockHeader {
@@ -82,6 +83,10 @@ inline Pool::~Pool() {
 inline void *Pool::allocate(std::size_t size) {
   if (size == 0) {
     return nullptr;
+  }
+
+  if (size > (1ULL << std::size(pools))) {
+    throw std::bad_alloc();
   }
 
   std::size_t exponent = 0;
