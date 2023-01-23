@@ -1,3 +1,9 @@
 /a.out
 /test_pool
+
+# Example nginx build with module.
 /example/nginx/
+/example/logs/*
+!/example/logs/README.md
+/example/client_body_temp/
+/example/fastcgi_temp/

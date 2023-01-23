@@ -3,7 +3,8 @@
 set -x
 set -e
 
-cd "$(dirname "$0")/.."
+example_dir="$(realpath "$(dirname "$0")"/..)"
+cd "$example_dir"
 
 # Make sure that the nginx submodule is cloned.
 if ! [ -d "nginx" ]; then
@@ -14,5 +15,18 @@ if ! [ -d "nginx" ]; then
 fi
 
 cd nginx
-./configure --add-module=../module --without-pcre --without-pcre2 --without-http_rewrite_module
+./configure \
+    --add-module=../module \
+    --without-pcre \
+    --without-pcre2 \
+    --without-http_rewrite_module \
+    --without-mail_pop3_module \
+    --without-mail_imap_module \
+    --without-mail_smtp_module \
+    --without-http_fastcgi_module \
+    --without-http_scgi_module \
+    --http-log-path=/tmp/nginx-curl-example \
+    "--prefix=$example_dir" \
+    # --with-debug
+
 make -j

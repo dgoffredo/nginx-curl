@@ -85,20 +85,20 @@ static void process_messages(ngx_curl_t *curl) {
     CURL *handle = message->easy_handle;
     CURLMcode mrc = curl_multi_remove_handle(curl->multi, handle);
     if (mrc != CURLM_OK) {
-      // TODO: log with ngx_cycle->log
+      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: DERP");
     }
 
     ngx_curl_handle_context_t *context;
     CURLcode rc = curl_easy_getinfo(handle, CURLINFO_PRIVATE, &context);
     if (rc != CURLE_OK) {
-      // TODO: log to ngx_cycle->log
+      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: HERP DERP");
       // This is a leak.  What can we do?
       continue;
     }
 
     rc = curl_easy_setopt(handle, CURLOPT_PRIVATE, context->user_data);
     if (rc != CURLE_OK) {
-      // TODO: log to ngx_cycle->log
+      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: giant burp");
       // This is a leak.  What can we do?
       continue;
     }
@@ -148,7 +148,7 @@ static void on_connection_event(ngx_event_t *event) {
                                    ev_bitmask,
                                    &num_running_handles);
   if (mrc != CURLM_OK) {
-    // TODO: log with ngx_cycle->log
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: slurp slurp");
   }
 
   process_messages(curl);
@@ -162,7 +162,7 @@ static void on_timeout(ngx_event_t *event) {
   int num_running_handles;
   CURLMcode mrc = curl_multi_socket_action(curl->multi, CURL_SOCKET_TIMEOUT, 0, &num_running_handles);
   if (mrc != CURLM_OK) {
-    // TODO: log with ngx_cycle->log
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: timurp");
   }
 
   process_messages(curl);
@@ -185,12 +185,12 @@ static int on_register_timer(CURLM *multi, long timeout_milliseconds, void *user
   // > the timer. All other values are valid expire times in number of
   // > milliseconds. 
 
-  ngx_event_del_timer(&curl->timeout);
-  if (timeout_milliseconds == -1) {
+  if (timeout_milliseconds == -1 && curl->timeout.timer_set) {
+    ngx_del_timer(&curl->timeout);
     return 0;
   }
 
-  curl->timeout.data = curl;
+  curl->timeout.data = curl; // TODO: crashes in debug mode due to assumption of this being ngx_connection_t*
   curl->timeout.log = ngx_cycle->log;
   curl->timeout.handler = &on_timeout;
   curl->timeout.cancelable = true; // otherwise a pending timeout will prevent shutdown
@@ -222,7 +222,7 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
     // the next time libcurl calls us about this socket (`s`).
     CURLMcode mrc = curl_multi_assign(curl->multi, s, connection);
     if (mrc != CURLM_OK) {
-      // TODO: log with ngx_cycle->log
+      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: why is there so much error handling?");
       return -1;
     }
     ngx_int_t rc = ngx_add_conn(connection);
@@ -285,12 +285,12 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
     }
     CURLMcode mrc = curl_multi_assign(curl->multi, s, NULL);
     if (mrc != CURLM_OK) {
-      // TODO: log with ngx_cycle->log
+      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: catch on fire!");
       return -1;
     }
   } break;
   default:
-    // TODO: log with ngx_cycle->log
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: eeeeeeeeeeeeeeeeee!");
     return -1;
   }
 
@@ -317,7 +317,7 @@ ngx_curl_t *ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t 
       CURL_GLOBAL_DEFAULT, allocator->allocate, allocator->free,
       allocator->reallocate, allocator->duplicate, allocator->callocate);
   if (rc != CURLE_OK) {
-    // TODO: log (ngx_cycle->log)
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: the horror!");
     abort(); // TODO
     return NULL;
   }
@@ -327,7 +327,7 @@ ngx_curl_t *ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t 
 
   curl->multi = curl_multi_init();
   if (curl->multi == NULL) {
-    // TODO: log (ngx_cycle->log)
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: no no no no!");
     curl_global_cleanup();
     allocator->free(curl);
     abort(); // TODO
@@ -342,7 +342,7 @@ ngx_curl_t *ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t 
 
   mrc = curl_multi_setopt(curl->multi, CURLMOPT_TIMERDATA, curl);
   if (mrc != CURLM_OK) {
-    // TODO: log (ngx_cycle->log)
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: it isn't right!");
     curl_multi_cleanup(curl->multi);
     curl_global_cleanup();
     allocator->free(curl);
@@ -360,11 +360,14 @@ ngx_curl_t *ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t 
 void ngx_destroy_curl(ngx_curl_t *curl) {
   CURLMcode rc = curl_multi_cleanup(curl->multi);
   if (rc != CURLM_OK) {
-    // TODO: log (ngx_cycle->log)
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: shit!");
     abort(); // TODO
   }
 
-  ngx_event_del_timer(&curl->timeout);
+  if (curl->timeout.timer_set) {
+    ngx_del_timer(&curl->timeout);
+  }
+
   curl->allocator->free(curl);
 }
 
@@ -386,14 +389,14 @@ ngx_int_t ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
   CURLcode rc =
       curl_easy_getinfo(handle, CURLINFO_PRIVATE, &context->user_data);
   if (rc != CURLE_OK) {
-    // TODO: log to ngx_cycle->log
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: why? WHY?");
     curl->allocator->free(context);
     return -1;
   }
 
   rc = curl_easy_setopt(handle, CURLOPT_PRIVATE, context);
   if (rc != CURLE_OK) {
-    // TODO: log to ngx_cycle->log
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: deliver us from this evil, Lord");
     curl->allocator->free(context);
     return -2;
   }
@@ -403,7 +406,7 @@ ngx_int_t ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
 
   CURLMcode mrc = curl_multi_add_handle(curl->multi, handle);
   if (mrc != CURLM_OK) {
-    // TODO: log to ngx_cycle->log
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: I am a giant egg");
     (void)curl_easy_setopt(handle, CURLOPT_PRIVATE, context->user_data);
     curl->allocator->free(context);
     return -3;
@@ -434,20 +437,20 @@ ngx_int_t ngx_curl_remove_handle(ngx_curl_t *curl, CURL *handle) {
   ngx_curl_handle_context_t *context;
   CURLcode rc = curl_easy_getinfo(handle, CURLINFO_PRIVATE, &context);
   if (rc != CURLE_OK) {
-    // TODO: log to ngx_cycle->log
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: hurrrrrrrr");
     return -1;
   }
 
   rc = curl_easy_setopt(handle, CURLOPT_PRIVATE, context->user_data);
   curl->allocator->free(context);
   if (rc != CURLE_OK) {
-    // TODO: log to ngx_cycle->log. And careful, `context` is already deleted.
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: durrrrrrrrrr");
     return -2;
   }
 
   CURLMcode mrc = curl_multi_remove_handle(curl->multi, handle);
   if (mrc != CURLM_OK) {
-    // TODO: log to ngx_cycle->log
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: shit shit shit shit shit");
     return -3;
   }
 

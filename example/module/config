@@ -1,6 +1,7 @@
 ngx_module_type=HTTP
 ngx_module_name=ngx_curl_example_module
 ngx_module_srcs="$ngx_addon_dir/ngx_curl_example_module.c $ngx_addon_dir/ngx_curl.c"
+ngx_module_libs=-lcurl
 
 . auto/module
 
