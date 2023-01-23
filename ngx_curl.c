@@ -1,9 +1,9 @@
 #include "ngx_curl.h"
 
-#include <nginx.h>    // TODO?
-#include <ngx_core.h> // TODO?
+#include <ngx_event.h>
 
 #include <assert.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -42,7 +42,7 @@ static char *duplicate_from_pool(const char *string) {
 }
 */
 
-static const ngx_curl_allocator_t system_allocator = {&malloc, &calloc,
+static const ngx_curl_allocator_t malloc_allocator = {&malloc, &calloc,
                                                       &realloc, &free, &strdup};
 
 /* TODO
@@ -56,7 +56,7 @@ static const ngx_curl_allocator_t pool_allocator = {
 */
 
 struct ngx_curl_s {
-  ngx_curl_allocator_t *allocator;
+  const ngx_curl_allocator_t *allocator;
   CURLM *multi;
   ngx_event_t timeout;
 };
@@ -69,15 +69,133 @@ typedef struct ngx_curl_handle_context_s {
   void *user_data;
 } ngx_curl_handle_context_t;
 
+static void process_messages(ngx_curl_t *curl) {
+  assert(curl);
+  assert(curl->multi);
+  assert(curl->allocator);
+
+  struct CURLMsg *message;
+  do {
+    int num_messages = 0;
+    message = curl_multi_info_read(curl->multi, &num_messages);
+    if(!message || message->msg != CURLMSG_DONE) {
+      continue;
+    }
+    
+    CURL *handle = message->easy_handle;
+    CURLMcode mrc = curl_multi_remove_handle(curl->multi, handle);
+    if (mrc != CURLM_OK) {
+      // TODO: log with ngx_cycle->log
+    }
+
+    ngx_curl_handle_context_t *context;
+    CURLcode rc = curl_easy_getinfo(handle, CURLINFO_PRIVATE, &context);
+    if (rc != CURLE_OK) {
+      // TODO: log to ngx_cycle->log
+      // This is a leak.  What can we do?
+      continue;
+    }
+
+    rc = curl_easy_setopt(handle, CURLOPT_PRIVATE, context->user_data);
+    if (rc != CURLE_OK) {
+      // TODO: log to ngx_cycle->log
+      // This is a leak.  What can we do?
+      continue;
+    }
+
+    // Finally, it's time to invoke a user-supplied callback.
+    rc = message->data.result;
+    if (rc == CURLE_OK) {
+      context->on_done(handle);
+    } else {
+      context->on_error(handle, rc);
+    }
+
+    curl->allocator->free(context);
+  } while (message);
+}
+
 static void on_connection_event(ngx_event_t *event) {
   assert(event);
   ngx_connection_t *connection = event->data;
   assert(connection);
   ngx_curl_t *curl = connection->data;
   assert(curl);
+  assert(curl->multi);
 
-  // TODO: call the multi handle's "action" and then handle any messages.
-  // This can be factored into a function.
+  // From libcurl's documentation:
+  //
+  // > When the events on a socket are known, they can be passed as an events
+  // > bitmask ev_bitmask by first setting ev_bitmask to 0, and then adding using
+  // > bitwise OR (|) any combination of events to be chosen from
+  // > CURL_CSELECT_IN, CURL_CSELECT_OUT or CURL_CSELECT_ERR. When the events on
+  // > a socket are unknown, pass 0 instead, and libcurl will test the descriptor
+  // > internally.
+  int ev_bitmask = 0;
+  if (connection->read->ready) {
+    ev_bitmask |= CURL_CSELECT_IN;
+  }
+  if (connection->write->ready) {
+    ev_bitmask |= CURL_CSELECT_OUT;
+  }
+  if (connection->read->error || connection->write-> error) {
+    ev_bitmask |= CURL_CSELECT_ERR;
+  }
+
+  int num_running_handles;
+  CURLMcode mrc = curl_multi_socket_action(curl->multi,
+                                   connection->fd,
+                                   ev_bitmask,
+                                   &num_running_handles);
+  if (mrc != CURLM_OK) {
+    // TODO: log with ngx_cycle->log
+  }
+
+  process_messages(curl);
+}
+
+static void on_timeout(ngx_event_t *event) {
+  ngx_curl_t *curl = event->data;
+  assert(curl);
+  assert(curl->multi);
+
+  int num_running_handles;
+  CURLMcode mrc = curl_multi_socket_action(curl->multi, CURL_SOCKET_TIMEOUT, 0, &num_running_handles);
+  if (mrc != CURLM_OK) {
+    // TODO: log with ngx_cycle->log
+  }
+
+  process_messages(curl);
+}
+
+static int on_register_timer(CURLM *multi, long timeout_milliseconds, void *user_data) {
+  assert(multi);
+  assert(user_data);
+  ngx_curl_t *curl = user_data;
+  assert(curl->multi == multi);
+
+  // From the libcurl docs:
+  //
+  // > Your callback function timer_callback should install a non-repeating
+  // > timer with an expire time of timeout_ms milliseconds. When that timer
+  // > fires, call either curl_multi_socket_action or curl_multi_perform,
+  // > depending on which interface you use.
+  // >
+  // > A timeout_ms value of -1 passed to this callback means you should delete
+  // > the timer. All other values are valid expire times in number of
+  // > milliseconds. 
+
+  ngx_event_del_timer(&curl->timeout);
+  if (timeout_milliseconds == -1) {
+    return 0;
+  }
+
+  curl->timeout.data = curl;
+  curl->timeout.log = ngx_cycle->log;
+  curl->timeout.handler = &on_timeout;
+  curl->timeout.cancelable = true; // otherwise a pending timeout will prevent shutdown
+  ngx_add_timer(&curl->timeout, timeout_milliseconds);
+  return 0;
 }
 
 static int on_register_event(CURL *easy, curl_socket_t s, int what,
@@ -176,26 +294,28 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
     return -1;
   }
 
-  // TODO: Call the multi handle's "action" function, and then check for
-  // messages. This can be factored into a function.
-
   return 0; // success
 }
 
-ngx_curl_t *ngx_create_curl(ngx_curl_allocation_policy_t policy) {
-  ngx_curl_allocator_t *allocator;
+ngx_curl_t *ngx_create_curl(void) {
+  return ngx_create_curl_with_allocation_policy(NGX_CURL_MALLOC_ALLOCATOR);
+}
+
+ngx_curl_t *ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t policy) {
+  const ngx_curl_allocator_t *allocator;
   switch (policy) {
-  case NGX_CURL_SYSTEM_ALLOCATOR:
-    allocator = &system_allocator;
+  case NGX_CURL_MALLOC_ALLOCATOR:
+    allocator = &malloc_allocator;
     break;
   default:
     assert(policy == NGX_CURL_POOL_ALLOCATOR);
-    allocator = &pool_allocator;
+    // TODO allocator = &pool_allocator;
+    allocator = &malloc_allocator;  // TODO
   }
 
   CURLcode rc = curl_global_init_mem(
       CURL_GLOBAL_DEFAULT, allocator->allocate, allocator->free,
-      allocator->reallocate, allocator->callocate, allocator->duplicate);
+      allocator->reallocate, allocator->duplicate, allocator->callocate);
   if (rc != CURLE_OK) {
     // TODO: log (ngx_cycle->log)
     abort(); // TODO
@@ -220,7 +340,17 @@ ngx_curl_t *ngx_create_curl(ngx_curl_allocation_policy_t policy) {
   mrc = curl_multi_setopt(curl->multi, CURLMOPT_SOCKETDATA, curl);
   assert(mrc == CURLM_OK); // that's what the docs say
 
-  // TODO: Set the timer function, too.
+  mrc = curl_multi_setopt(curl->multi, CURLMOPT_TIMERDATA, curl);
+  if (mrc != CURLM_OK) {
+    // TODO: log (ngx_cycle->log)
+    curl_multi_cleanup(curl->multi);
+    curl_global_cleanup();
+    allocator->free(curl);
+    abort(); // TODO
+    return NULL;
+  }
+
+  mrc = curl_multi_setopt(curl->multi, CURLMOPT_TIMERFUNCTION, &on_register_timer);
 
   return curl;
 }
@@ -234,6 +364,7 @@ void ngx_destroy_curl(ngx_curl_t *curl) {
     abort(); // TODO
   }
 
+  ngx_event_del_timer(&curl->timeout);
   curl->allocator->free(curl);
 }
 
@@ -278,6 +409,14 @@ ngx_int_t ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
     return -3;
   }
 
+  /* TODO: from the libcurl docs:
+  When you have added your initial set of handles, you call
+  curl_multi_socket_action with CURL_SOCKET_TIMEOUT set in the sockfd argument,
+  and you will get callbacks call that sets you up and you then continue to
+  call curl_multi_socket_action accordingly when you get activity on the
+  sockets you have been asked to wait on, or if the timeout timer expires.
+  */
+
   return 0;
 }
 
@@ -311,4 +450,6 @@ ngx_int_t ngx_curl_remove_handle(ngx_curl_t *curl, CURL *handle) {
     // TODO: log to ngx_cycle->log
     return -3;
   }
+
+  return 0;
 }

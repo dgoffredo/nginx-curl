@@ -11,6 +11,9 @@
 // TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
 // TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO TODO
 
+// nginx headers must go first
+#include <ngx_core.h>
+
 #include <curl/curl.h>
 
 /* notes:
@@ -58,11 +61,13 @@ ngx_del_connection
 typedef struct ngx_curl_s ngx_curl_t;
 
 typedef enum ngx_curl_allocation_policy_e {
-  NGX_CURL_SYSTEM_ALLOCATOR,
+  NGX_CURL_MALLOC_ALLOCATOR,
   NGX_CURL_POOL_ALLOCATOR
 } ngx_curl_allocation_policy_t;
 
-ngx_curl_t *ngx_create_curl(ngx_curl_allocation_policy_t);
+ngx_curl_t *ngx_create_curl(void);
+
+ngx_curl_t *ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t);
 
 void ngx_destroy_curl(ngx_curl_t *);
 

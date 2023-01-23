@@ -1,0 +1,18 @@
+#!/bin/sh
+
+set -x
+set -e
+
+cd "$(dirname "$0")/.."
+
+# Make sure that the nginx submodule is cloned.
+if ! [ -d "nginx" ]; then
+  curl -s -S -L -o nginx.tar.gz 'https://nginx.org/download/nginx-1.23.3.tar.gz'
+  mkdir nginx
+  tar xzf nginx.tar.gz -C nginx --strip-components 1
+  rm nginx.tar.gz
+fi
+
+cd nginx
+./configure --add-module=../module --without-pcre --without-pcre2 --without-http_rewrite_module
+make -j
