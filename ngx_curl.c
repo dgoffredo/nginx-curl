@@ -185,8 +185,10 @@ static int on_register_timer(CURLM *multi, long timeout_milliseconds,
   // > the timer. All other values are valid expire times in number of
   // > milliseconds.
 
-  if (timeout_milliseconds == -1 && curl->timeout.timer_set) {
-    ngx_del_timer(&curl->timeout);
+  if (timeout_milliseconds == -1) {
+    if (curl->timeout.timer_set) {
+      ngx_del_timer(&curl->timeout);
+    }
     return 0;
   }
 
@@ -236,22 +238,21 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
     connection = socket_context;
   }
 
-  /* `what` values, from the curl docs:
-
-  CURL_POLL_IN
-  Wait for incoming data. For the socket to become readable.
-
-  CURL_POLL_OUT
-  Wait for outgoing data. For the socket to become writable.
-
-  CURL_POLL_INOUT
-  Wait for incoming and outgoing data. For the socket to become readable or
-  writable.
-
-  CURL_POLL_REMOVE
-  The specified socket/file descriptor is no longer used by libcurl for any
-  active transfer. It might soon be added again.
-  */
+  // `what` values, from the curl docs:
+  //
+  // > CURL_POLL_IN
+  // > Wait for incoming data. For the socket to become readable.
+  // >
+  // > CURL_POLL_OUT
+  // > Wait for outgoing data. For the socket to become writable.
+  // >
+  // > CURL_POLL_INOUT
+  // > Wait for incoming and outgoing data. For the socket to become readable or
+  // > writable.
+  // >
+  // > CURL_POLL_REMOVE
+  // > The specified socket/file descriptor is no longer used by libcurl for any
+  // > active transfer. It might soon be added again.
 
   switch (what) {
   case CURL_POLL_IN:
