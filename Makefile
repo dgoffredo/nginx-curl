@@ -3,4 +3,4 @@ test_pool : test_pool.cpp pool.h pool.cpp
 
 .PHONY: format
 format:
-	clang-format-14 -i *.cpp *.c *.h
+	clang-format-14 -i *.cpp *.c *.h example/module/ngx_curl_example_module.c

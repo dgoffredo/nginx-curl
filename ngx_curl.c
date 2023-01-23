@@ -78,10 +78,10 @@ static void process_messages(ngx_curl_t *curl) {
   do {
     int num_messages = 0;
     message = curl_multi_info_read(curl->multi, &num_messages);
-    if(!message || message->msg != CURLMSG_DONE) {
+    if (!message || message->msg != CURLMSG_DONE) {
       continue;
     }
-    
+
     CURL *handle = message->easy_handle;
     CURLMcode mrc = curl_multi_remove_handle(curl->multi, handle);
     if (mrc != CURLM_OK) {
@@ -126,11 +126,11 @@ static void on_connection_event(ngx_event_t *event) {
   // From libcurl's documentation:
   //
   // > When the events on a socket are known, they can be passed as an events
-  // > bitmask ev_bitmask by first setting ev_bitmask to 0, and then adding using
-  // > bitwise OR (|) any combination of events to be chosen from
-  // > CURL_CSELECT_IN, CURL_CSELECT_OUT or CURL_CSELECT_ERR. When the events on
-  // > a socket are unknown, pass 0 instead, and libcurl will test the descriptor
-  // > internally.
+  // > bitmask ev_bitmask by first setting ev_bitmask to 0, and then adding
+  // using > bitwise OR (|) any combination of events to be chosen from >
+  // CURL_CSELECT_IN, CURL_CSELECT_OUT or CURL_CSELECT_ERR. When the events on
+  // > a socket are unknown, pass 0 instead, and libcurl will test the
+  // descriptor > internally.
   int ev_bitmask = 0;
   if (connection->read->ready) {
     ev_bitmask |= CURL_CSELECT_IN;
@@ -138,15 +138,13 @@ static void on_connection_event(ngx_event_t *event) {
   if (connection->write->ready) {
     ev_bitmask |= CURL_CSELECT_OUT;
   }
-  if (connection->read->error || connection->write-> error) {
+  if (connection->read->error || connection->write->error) {
     ev_bitmask |= CURL_CSELECT_ERR;
   }
 
   int num_running_handles;
-  CURLMcode mrc = curl_multi_socket_action(curl->multi,
-                                   connection->fd,
-                                   ev_bitmask,
-                                   &num_running_handles);
+  CURLMcode mrc = curl_multi_socket_action(curl->multi, connection->fd,
+                                           ev_bitmask, &num_running_handles);
   if (mrc != CURLM_OK) {
     ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: slurp slurp");
   }
@@ -160,7 +158,8 @@ static void on_timeout(ngx_event_t *event) {
   assert(curl->multi);
 
   int num_running_handles;
-  CURLMcode mrc = curl_multi_socket_action(curl->multi, CURL_SOCKET_TIMEOUT, 0, &num_running_handles);
+  CURLMcode mrc = curl_multi_socket_action(curl->multi, CURL_SOCKET_TIMEOUT, 0,
+                                           &num_running_handles);
   if (mrc != CURLM_OK) {
     ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: timurp");
   }
@@ -168,7 +167,8 @@ static void on_timeout(ngx_event_t *event) {
   process_messages(curl);
 }
 
-static int on_register_timer(CURLM *multi, long timeout_milliseconds, void *user_data) {
+static int on_register_timer(CURLM *multi, long timeout_milliseconds,
+                             void *user_data) {
   assert(multi);
   assert(user_data);
   ngx_curl_t *curl = user_data;
@@ -183,17 +183,19 @@ static int on_register_timer(CURLM *multi, long timeout_milliseconds, void *user
   // >
   // > A timeout_ms value of -1 passed to this callback means you should delete
   // > the timer. All other values are valid expire times in number of
-  // > milliseconds. 
+  // > milliseconds.
 
   if (timeout_milliseconds == -1 && curl->timeout.timer_set) {
     ngx_del_timer(&curl->timeout);
     return 0;
   }
 
-  curl->timeout.data = curl; // TODO: crashes in debug mode due to assumption of this being ngx_connection_t*
+  curl->timeout.data = curl; // TODO: crashes in debug mode due to assumption of
+                             // this being ngx_connection_t*
   curl->timeout.log = ngx_cycle->log;
   curl->timeout.handler = &on_timeout;
-  curl->timeout.cancelable = true; // otherwise a pending timeout will prevent shutdown
+  curl->timeout.cancelable =
+      true; // otherwise a pending timeout will prevent shutdown
   ngx_add_timer(&curl->timeout, timeout_milliseconds);
   return 0;
 }
@@ -222,7 +224,8 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
     // the next time libcurl calls us about this socket (`s`).
     CURLMcode mrc = curl_multi_assign(curl->multi, s, connection);
     if (mrc != CURLM_OK) {
-      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: why is there so much error handling?");
+      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                    "TODO: why is there so much error handling?");
       return -1;
     }
     ngx_int_t rc = ngx_add_conn(connection);
@@ -301,7 +304,8 @@ ngx_curl_t *ngx_create_curl(void) {
   return ngx_create_curl_with_allocation_policy(NGX_CURL_MALLOC_ALLOCATOR);
 }
 
-ngx_curl_t *ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t policy) {
+ngx_curl_t *
+ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t policy) {
   const ngx_curl_allocator_t *allocator;
   switch (policy) {
   case NGX_CURL_MALLOC_ALLOCATOR:
@@ -310,7 +314,7 @@ ngx_curl_t *ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t 
   default:
     assert(policy == NGX_CURL_POOL_ALLOCATOR);
     // TODO allocator = &pool_allocator;
-    allocator = &malloc_allocator;  // TODO
+    allocator = &malloc_allocator; // TODO
   }
 
   CURLcode rc = curl_global_init_mem(
@@ -350,7 +354,8 @@ ngx_curl_t *ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t 
     return NULL;
   }
 
-  mrc = curl_multi_setopt(curl->multi, CURLMOPT_TIMERFUNCTION, &on_register_timer);
+  mrc = curl_multi_setopt(curl->multi, CURLMOPT_TIMERFUNCTION,
+                          &on_register_timer);
 
   return curl;
 }
@@ -396,7 +401,8 @@ ngx_int_t ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
 
   rc = curl_easy_setopt(handle, CURLOPT_PRIVATE, context);
   if (rc != CURLE_OK) {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: deliver us from this evil, Lord");
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                  "TODO: deliver us from this evil, Lord");
     curl->allocator->free(context);
     return -2;
   }
@@ -450,7 +456,8 @@ ngx_int_t ngx_curl_remove_handle(ngx_curl_t *curl, CURL *handle) {
 
   CURLMcode mrc = curl_multi_remove_handle(curl->multi, handle);
   if (mrc != CURLM_OK) {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: shit shit shit shit shit");
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                  "TODO: shit shit shit shit shit");
     return -3;
   }
 

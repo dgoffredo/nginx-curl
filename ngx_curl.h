@@ -67,7 +67,8 @@ typedef enum ngx_curl_allocation_policy_e {
 
 ngx_curl_t *ngx_create_curl(void);
 
-ngx_curl_t *ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t);
+ngx_curl_t *
+    ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t);
 
 void ngx_destroy_curl(ngx_curl_t *);
 
