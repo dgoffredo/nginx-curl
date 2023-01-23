@@ -127,10 +127,10 @@ static void on_connection_event(ngx_event_t *event) {
   //
   // > When the events on a socket are known, they can be passed as an events
   // > bitmask ev_bitmask by first setting ev_bitmask to 0, and then adding
-  // using > bitwise OR (|) any combination of events to be chosen from >
-  // CURL_CSELECT_IN, CURL_CSELECT_OUT or CURL_CSELECT_ERR. When the events on
-  // > a socket are unknown, pass 0 instead, and libcurl will test the
-  // descriptor > internally.
+  // > using bitwise OR (|) any combination of events to be chosen from
+  // > CURL_CSELECT_IN, CURL_CSELECT_OUT or CURL_CSELECT_ERR. When the events
+  // > on a socket are unknown, pass 0 instead, and libcurl will test the
+  // > descriptor internally.
   int ev_bitmask = 0;
   if (connection->read->ready) {
     ev_bitmask |= CURL_CSELECT_IN;
@@ -419,13 +419,20 @@ ngx_int_t ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
     return -3;
   }
 
-  /* TODO: from the libcurl docs:
-  When you have added your initial set of handles, you call
-  curl_multi_socket_action with CURL_SOCKET_TIMEOUT set in the sockfd argument,
-  and you will get callbacks call that sets you up and you then continue to
-  call curl_multi_socket_action accordingly when you get activity on the
-  sockets you have been asked to wait on, or if the timeout timer expires.
-  */
+  // From the libcurl docs:
+  //
+  // > When you have added your initial set of handles, you call
+  // > curl_multi_socket_action with CURL_SOCKET_TIMEOUT set in the sockfd
+  // > argument, and you will get callbacks call that sets you up and you then
+  // > continue to call curl_multi_socket_action accordingly when you get
+  // > activity on the sockets you have been asked to wait on, or if the timeout
+  // > timer expires.
+  int num_running_handles;
+  mrc = curl_multi_socket_action(curl->multi, CURL_SOCKET_TIMEOUT, 0,
+                                 &num_running_handles);
+  if (mrc != CURLM_OK) {
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: wahwahwahwahwah");
+  }
 
   return 0;
 }
