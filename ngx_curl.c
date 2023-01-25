@@ -10,44 +10,8 @@
 #include <string.h>
 #include <unistd.h>
 
-// TODO static ngx_curl_pool_t pool = {0};
-
-/*
-TODO
-
-static void *allocate_from_pool(size_t size) {
-  return ngx_curl_pool_allocate(&pool, size);
-}
-
-static void *callocate_from_pool(size_t count, size_t size_each) {
-  return ngx_curl_pool_callocate(&pool, count, size_each);
-}
-
-static void *reallocate_from_pool(void* pointer, size_t new_size) {
-  return ngx_curl_pool_reallocate(&pool, pointer, new_size);
-}
-
-static void *free_from_pool(void* pointer) {
-  ngx_curl_pool_free(&pool, pointer);
-}
-
-static char *duplicate_from_pool(const char *string) {
-  return ngx_curl_pool_duplicate(&pool, string);
-}
-*/
-
 static const ngx_curl_allocator_t malloc_allocator = {&malloc, &calloc,
                                                       &realloc, &free, &strdup};
-
-/* TODO
-static const ngx_curl_allocator_t pool_allocator = {
-  &allocate_from_pool,
-  &callocate_from_pool,
-  &reallocate_from_pool,
-  &free_from_pool,
-  &duplicate_from_pool,
-};
-*/
 
 struct ngx_curl_s {
   const ngx_curl_allocator_t *allocator;
@@ -200,14 +164,39 @@ static int on_register_timer(CURLM *multi, long timeout_milliseconds,
   return 0;
 }
 
+static int call_counter;
+
 static int on_register_event(CURL *easy, curl_socket_t s, int what,
                              void *user_data, void *socket_context) {
   assert(easy);
   assert(user_data);
   ngx_curl_t *curl = user_data;
 
+  // TODO: no
+  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "{{{{{{{{{{ call count %d",
+                call_counter);
+  ++call_counter;
+  switch (what) {
+  case CURL_POLL_IN:
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "[CURL_POLL_IN]");
+    break;
+  case CURL_POLL_OUT:
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "[CURL_POLL_OUT]");
+    break;
+  case CURL_POLL_INOUT:
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "[CURL_POLL_INOUT]");
+    break;
+  case CURL_POLL_REMOVE:
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "[CURL_POLL_REMOVE]");
+    break;
+  }
+
   ngx_connection_t *connection;
   if (socket_context == NULL) {
+    // TODO: no
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                  "()()()()() No socket context.");
+
     // This socket (`s`) is new to us. Get an nginx connection for it and
     // associate that connection with the socket.
     connection = ngx_get_connection(s, ngx_cycle->log);
@@ -229,21 +218,11 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
       abort(); // TODO
       return -1;
     }
-    // TODO: If it's already added, that's an error.
-    // Uh oh... adding the log line below makes the error go away...
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "curl fd: %d nginx fd: %d", s, connection->fd);
-    if (what == CURL_POLL_REMOVE) {
-      // TODO: nope
-      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "This is unexpected!");
-    }
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "read active? %d write active? %d", connection->read->active, connection->write->active); // TODO
-    /* TODO: YOLO
-    ngx_int_t rc = ngx_add_conn(connection);
-    if (rc != NGX_OK) {
-      abort(); // TODO
-      return -1;
-    }
-    */
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "curl fd: %d nginx fd: %d", s,
+                  connection->fd); // TODO
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                  "read active? %d write active? %d", connection->read->active,
+                  connection->write->active); // TODO
   } else {
     connection = socket_context;
   }
@@ -253,6 +232,7 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
   // management is borked, or is it ok to just set the loggers here?
   connection->read->log = ngx_cycle->log;
   connection->write->log = ngx_cycle->log;
+  ngx_set_connection_log(connection, ngx_cycle->log); // probably unnecessary
 
   // `what` values, from the curl docs:
   //
@@ -273,62 +253,70 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
   switch (what) {
   case CURL_POLL_IN:
     connection->read->handler = &on_connection_event;
-    connection->read->ready = true;
-    /*if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
-      abort(); // TODO
-      return -1;
-    }*/
-    connection->write->ready = false;
-    /*
-    if (ngx_del_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
-      abort(); // TODO
-      return -1;
+    if (!connection->read->active) {
+      if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
+        abort(); // TODO
+        return -1;
+      }
     }
-    */
+    if (connection->write->active) {
+      if (ngx_del_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
+        abort(); // TODO
+        return -1;
+      }
+    }
     break;
   case CURL_POLL_OUT:
     connection->write->handler = &on_connection_event;
-    connection->write->ready = true;
-    /*if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
-      abort(); // TODO
-      return -1;
-    }*/
-    connection->read->ready = false;
-    /*if (ngx_del_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
-      abort(); // TODO
-      return -1;
-    }*/
+    if (!connection->write->active) {
+      if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
+        abort(); // TODO
+        return -1;
+      }
+    }
+    if (connection->read->active) {
+      if (ngx_del_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
+        abort(); // TODO
+        return -1;
+      }
+    }
     break;
   case CURL_POLL_INOUT:
     connection->read->handler = &on_connection_event;
-    connection->read->ready = true;
-    /*if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
-      abort(); // TODO
-      return -1;
-    }*/
+    if (!connection->read->active) {
+      if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
+        abort(); // TODO
+        return -1;
+      }
+    }
     connection->write->handler = &on_connection_event;
-    connection->write->ready = true;
-    /*if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
-      abort(); // TODO
-      return -1;
-    }*/
+    if (!connection->write->active) {
+      if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
+        abort(); // TODO
+        return -1;
+      }
+    }
     break;
   case CURL_POLL_REMOVE: {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "[][][][][][][] removing..."); // TODO: no
-    if (ngx_del_conn(connection, NGX_CLOSE_EVENT) != NGX_OK) {
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                  "[][][][][][][] removing..."); // TODO: no
+    // Remove the connection from nginx's event loop.
+    // Pass zero for the flags so that nginx actually removes the socket from
+    // the event loop.
+    if (ngx_del_conn(connection, 0) != NGX_OK) {
       abort(); // TODO
       return -1;
     }
     ngx_free_connection(connection); // TODO?
 
-    /* TODO: let's try leaving the association
+    // The user data associated with the socket appears to be cleared by
+    // libcurl anyway, but let's be explicit with cleanup here.
     CURLMcode mrc = curl_multi_assign(curl->multi, s, NULL);
     if (mrc != CURLM_OK) {
       ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: catch on fire!");
       abort(); // TODO
       return -1;
     }
-    */
   } break;
   default:
     ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: eeeeeeeeeeeeeeeeee!");
@@ -336,6 +324,7 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
     return -1;
   }
 
+  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "}}}}}}}}}} end call");
   return 0; // success
 }
 

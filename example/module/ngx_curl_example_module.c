@@ -90,7 +90,7 @@ static void on_error(CURL *handle, CURLcode error) {
 
 static void on_done(CURL *handle) {
   ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-                "Request completed successfully.");
+                "========== Request completed successfully. ===========");
   curl_easy_cleanup(handle);
 }
 
@@ -100,6 +100,13 @@ static size_t on_read_header(char *data, size_t, size_t length,
   char *buffer = allocator->allocate(length + 1);
   memcpy(buffer, data, length);
   buffer[length] = '\0';
+  // Remove the trailing carriage return while we're at it.
+  for (size_t i = 0; i < length; ++i) {
+    if (buffer[i] == '\r') {
+      buffer[i] = '\0';
+      break;
+    }
+  }
   ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "received header data: %s",
                 buffer);
   allocator->free(buffer);
@@ -128,7 +135,7 @@ static void make_request(ngx_event_t *) {
 
   ngx_curl_add_handle(curl, handle, &on_error, &on_done);
 
-  ngx_add_timer(&timer, 2000); // every two seconds
+  ngx_add_timer(&timer, 500);
 }
 
 static ngx_int_t ngx_curl_example_init_process(ngx_cycle_t *) {
@@ -138,7 +145,7 @@ static ngx_int_t ngx_curl_example_init_process(ngx_cycle_t *) {
   timer.handler = &make_request;
   timer.cancelable = true;
   timer.log = ngx_cycle->log;
-  ngx_add_timer(&timer, 2000); // every two seconds
+  ngx_add_timer(&timer, 500);
   return 0;
 }
 
