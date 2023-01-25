@@ -90,8 +90,9 @@ static void on_done(CURL *handle) {
 static size_t on_read_header(char *data, size_t, size_t length,
                              void *user_data) {
   const ngx_curl_allocator_t *allocator = user_data;
-  char *buffer = allocator->callocate(1, length + 1);
+  char *buffer = allocator->allocate(length + 1);
   memcpy(buffer, data, length);
+  buffer[length] = '\0';
   ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "received header data: %s", buffer);
   allocator->free(buffer);
   return length;
@@ -99,8 +100,9 @@ static size_t on_read_header(char *data, size_t, size_t length,
 
 static size_t on_read_body(char *data, size_t, size_t length, void *user_data) {
   const ngx_curl_allocator_t *allocator = user_data;
-  char *buffer = allocator->callocate(1, length + 1);
+  char *buffer = allocator->allocate(length + 1);
   memcpy(buffer, data, length);
+  buffer[length] = '\0';
   ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "received body data: %s", buffer);
   allocator->free(buffer);
   return length;
