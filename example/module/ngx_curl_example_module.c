@@ -78,12 +78,12 @@ static char *ngx_curl_example_enable(ngx_conf_t *cf, void *post, void *data) {
 static ngx_curl_t *curl;
 
 static void on_error(CURL *handle, CURLcode error) {
-  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "oh no!");
+  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "Error occurred making request.");
   curl_easy_cleanup(handle);
 }
 
 static void on_done(CURL *handle) {
-  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "yay!");
+  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "Request completed successfully.");
   curl_easy_cleanup(handle);
 }
 
@@ -92,7 +92,7 @@ static size_t on_read_header(char *data, size_t, size_t length,
   const ngx_curl_allocator_t *allocator = user_data;
   char *buffer = allocator->callocate(1, length + 1);
   memcpy(buffer, data, length);
-  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, buffer);
+  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "received header data: %s", buffer);
   allocator->free(buffer);
   return length;
 }
@@ -101,7 +101,7 @@ static size_t on_read_body(char *data, size_t, size_t length, void *user_data) {
   const ngx_curl_allocator_t *allocator = user_data;
   char *buffer = allocator->callocate(1, length + 1);
   memcpy(buffer, data, length);
-  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, buffer);
+  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "received body data: %s", buffer);
   allocator->free(buffer);
   return length;
 }
