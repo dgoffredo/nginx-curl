@@ -1,6 +1,8 @@
-#include "ngx_curl.h"
-
+// nginx headers must go first
+#include <ngx_core.h>
 #include <ngx_event.h>
+
+#include "ngx_curl.h"
 
 #include <assert.h>
 #include <stdbool.h>
@@ -397,9 +399,9 @@ void ngx_destroy_curl(ngx_curl_t *curl) {
   curl->allocator->free(curl);
 }
 
-ngx_int_t ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
-                              void (*on_error)(CURL *, CURLcode),
-                              void (*on_done)(CURL *)) {
+int ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
+                        void (*on_error)(CURL *, CURLcode),
+                        void (*on_done)(CURL *)) {
   assert(curl);
   assert(handle);
   assert(on_error);
@@ -457,7 +459,7 @@ ngx_int_t ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
   return 0;
 }
 
-ngx_int_t ngx_curl_remove_handle(ngx_curl_t *curl, CURL *handle) {
+int ngx_curl_remove_handle(ngx_curl_t *curl, CURL *handle) {
   assert(curl);
   assert(handle);
   assert(curl->multi);
@@ -496,3 +498,40 @@ const ngx_curl_allocator_t *ngx_curl_allocator(const ngx_curl_t *curl) {
   assert(curl);
   return curl->allocator;
 }
+
+/*
+Resolver stuff:
+
+Schemes understood by libcurl, according to:
+https://everything.curl.dev/cmdline/urls/scheme#supported-schemes
+
+dict
+file
+ftp
+ftps
+gopher
+gophers
+* http
+* https
+imap
+imaps
+ldap
+ldaps
+mqtt
+pop3
+pop3s
+rtmp
+rtmps
+rtsp
+scp
+sftp
+smb
+smbs
+smtp
+smtps
+telnet
+tftp
+
+If the scheme is http or https, then use nginx's resolver and add the result as
+an override for either port 80 or 443, respectively.
+*/

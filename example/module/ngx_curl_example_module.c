@@ -1,7 +1,10 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
+#include <ngx_event.h>
 
 #include "ngx_curl.h"
+
+#include <stdbool.h>
 
 typedef struct {
   ngx_flag_t enable;
@@ -76,14 +79,18 @@ static char *ngx_curl_example_enable(ngx_conf_t *cf, void *post, void *data) {
 }
 
 static ngx_curl_t *curl;
+ngx_connection_t dummy_connection;
+ngx_event_t timer;
 
 static void on_error(CURL *handle, CURLcode error) {
-  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "Error occurred making request.");
+  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                "Error occurred making request.");
   curl_easy_cleanup(handle);
 }
 
 static void on_done(CURL *handle) {
-  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "Request completed successfully.");
+  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                "Request completed successfully.");
   curl_easy_cleanup(handle);
 }
 
@@ -93,7 +100,8 @@ static size_t on_read_header(char *data, size_t, size_t length,
   char *buffer = allocator->allocate(length + 1);
   memcpy(buffer, data, length);
   buffer[length] = '\0';
-  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "received header data: %s", buffer);
+  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "received header data: %s",
+                buffer);
   allocator->free(buffer);
   return length;
 }
@@ -103,13 +111,13 @@ static size_t on_read_body(char *data, size_t, size_t length, void *user_data) {
   char *buffer = allocator->allocate(length + 1);
   memcpy(buffer, data, length);
   buffer[length] = '\0';
-  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "received body data: %s", buffer);
+  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "received body data: %s",
+                buffer);
   allocator->free(buffer);
   return length;
 }
 
-static ngx_int_t ngx_curl_example_init_process(ngx_cycle_t *) {
-  curl = ngx_create_curl();
+static void make_request(ngx_event_t *) {
   CURL *handle = curl_easy_init();
 
   curl_easy_setopt(handle, CURLOPT_URL, "https://api.ipify.org?format=json");
@@ -119,6 +127,18 @@ static ngx_int_t ngx_curl_example_init_process(ngx_cycle_t *) {
   curl_easy_setopt(handle, CURLOPT_WRITEDATA, ngx_curl_allocator(curl));
 
   ngx_curl_add_handle(curl, handle, &on_error, &on_done);
+
+  ngx_add_timer(&timer, 2000); // every two seconds
+}
+
+static ngx_int_t ngx_curl_example_init_process(ngx_cycle_t *) {
+  curl = ngx_create_curl();
+  dummy_connection.fd = -1;
+  timer.data = &dummy_connection;
+  timer.handler = &make_request;
+  timer.cancelable = true;
+  timer.log = ngx_cycle->log;
+  ngx_add_timer(&timer, 2000); // every two seconds
   return 0;
 }
 
