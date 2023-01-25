@@ -229,11 +229,21 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
       abort(); // TODO
       return -1;
     }
+    // TODO: If it's already added, that's an error.
+    // Uh oh... adding the log line below makes the error go away...
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "curl fd: %d nginx fd: %d", s, connection->fd);
+    if (what == CURL_POLL_REMOVE) {
+      // TODO: nope
+      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "This is unexpected!");
+    }
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "read active? %d write active? %d", connection->read->active, connection->write->active); // TODO
+    /* TODO: YOLO
     ngx_int_t rc = ngx_add_conn(connection);
     if (rc != NGX_OK) {
       abort(); // TODO
       return -1;
     }
+    */
   } else {
     connection = socket_context;
   }
@@ -263,49 +273,62 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
   switch (what) {
   case CURL_POLL_IN:
     connection->read->handler = &on_connection_event;
-    if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
+    connection->read->ready = true;
+    /*if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
       abort(); // TODO
       return -1;
-    }
+    }*/
+    connection->write->ready = false;
+    /*
     if (ngx_del_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
       abort(); // TODO
       return -1;
     }
+    */
     break;
   case CURL_POLL_OUT:
     connection->write->handler = &on_connection_event;
-    if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
+    connection->write->ready = true;
+    /*if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
       abort(); // TODO
       return -1;
-    }
-    if (ngx_del_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
+    }*/
+    connection->read->ready = false;
+    /*if (ngx_del_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
       abort(); // TODO
       return -1;
-    }
+    }*/
     break;
   case CURL_POLL_INOUT:
     connection->read->handler = &on_connection_event;
-    if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
+    connection->read->ready = true;
+    /*if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
       abort(); // TODO
       return -1;
-    }
+    }*/
     connection->write->handler = &on_connection_event;
-    if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
+    connection->write->ready = true;
+    /*if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
       abort(); // TODO
       return -1;
-    }
+    }*/
     break;
   case CURL_POLL_REMOVE: {
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "[][][][][][][] removing..."); // TODO: no
     if (ngx_del_conn(connection, NGX_CLOSE_EVENT) != NGX_OK) {
       abort(); // TODO
       return -1;
     }
+    ngx_free_connection(connection); // TODO?
+
+    /* TODO: let's try leaving the association
     CURLMcode mrc = curl_multi_assign(curl->multi, s, NULL);
     if (mrc != CURLM_OK) {
       ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: catch on fire!");
       abort(); // TODO
       return -1;
     }
+    */
   } break;
   default:
     ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: eeeeeeeeeeeeeeeeee!");
