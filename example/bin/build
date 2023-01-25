@@ -27,6 +27,6 @@ cd nginx
     --without-http_scgi_module \
     --http-log-path=/tmp/nginx-curl-example \
     "--prefix=$example_dir" \
-    # --with-debug
+    --with-debug
 
 make -j

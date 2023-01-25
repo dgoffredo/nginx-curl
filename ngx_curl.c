@@ -58,6 +58,7 @@ static const ngx_curl_allocator_t pool_allocator = {
 struct ngx_curl_s {
   const ngx_curl_allocator_t *allocator;
   CURLM *multi;
+  ngx_connection_t dummy_connection;
   ngx_event_t timeout;
 };
 
@@ -153,8 +154,12 @@ static void on_connection_event(ngx_event_t *event) {
 }
 
 static void on_timeout(ngx_event_t *event) {
-  ngx_curl_t *curl = event->data;
-  assert(curl);
+  assert(event);
+  assert(event->data);
+  // reminder: ngx_connection_t *dummy_connection = event->data;
+  char *dummy_connection_address = event->data;
+  ngx_curl_t *curl = (ngx_curl_t *)(dummy_connection_address -
+                                    offsetof(ngx_curl_t, dummy_connection));
   assert(curl->multi);
 
   int num_running_handles;
@@ -192,8 +197,7 @@ static int on_register_timer(CURLM *multi, long timeout_milliseconds,
     return 0;
   }
 
-  curl->timeout.data = curl; // TODO: crashes in debug mode due to assumption of
-                             // this being ngx_connection_t*
+  assert(curl->timeout.data == &curl->dummy_connection);
   curl->timeout.log = ngx_cycle->log;
   curl->timeout.handler = &on_timeout;
   curl->timeout.cancelable =
@@ -228,15 +232,23 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
     if (mrc != CURLM_OK) {
       ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
                     "TODO: why is there so much error handling?");
+      abort(); // TODO
       return -1;
     }
     ngx_int_t rc = ngx_add_conn(connection);
     if (rc != NGX_OK) {
+      abort(); // TODO
       return -1;
     }
   } else {
     connection = socket_context;
   }
+
+  // TODO: In debug mode, we're crashing below due to the connection's read
+  // event's `.log` being null.  Does this indicate that the connection
+  // management is borked, or is it ok to just set the loggers here?
+  connection->read->log = ngx_cycle->log;
+  connection->write->log = ngx_cycle->log;
 
   // `what` values, from the curl docs:
   //
@@ -258,43 +270,52 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
   case CURL_POLL_IN:
     connection->read->handler = &on_connection_event;
     if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
+      abort(); // TODO
       return -1;
     }
     if (ngx_del_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
+      abort(); // TODO
       return -1;
     }
     break;
   case CURL_POLL_OUT:
     connection->write->handler = &on_connection_event;
     if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
+      abort(); // TODO
       return -1;
     }
     if (ngx_del_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
+      abort(); // TODO
       return -1;
     }
     break;
   case CURL_POLL_INOUT:
     connection->read->handler = &on_connection_event;
     if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
+      abort(); // TODO
       return -1;
     }
     connection->write->handler = &on_connection_event;
     if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
+      abort(); // TODO
       return -1;
     }
     break;
   case CURL_POLL_REMOVE: {
     if (ngx_del_conn(connection, NGX_CLOSE_EVENT) != NGX_OK) {
+      abort(); // TODO
       return -1;
     }
     CURLMcode mrc = curl_multi_assign(curl->multi, s, NULL);
     if (mrc != CURLM_OK) {
       ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: catch on fire!");
+      abort(); // TODO
       return -1;
     }
   } break;
   default:
     ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: eeeeeeeeeeeeeeeeee!");
+    abort(); // TODO
     return -1;
   }
 
@@ -329,6 +350,24 @@ ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t policy) {
 
   ngx_curl_t *curl = allocator->callocate(1, sizeof(ngx_curl_t));
   curl->allocator = allocator;
+
+  // Initialize the dummy connection.  In debug mode, nginx assumes that the
+  // `void *ngx_event_t::data` member of the argument to `ngx_add_timer` points
+  // to an `ngx_connection_t`. This is understandable, because nginx uses timer
+  // events for I/O timeouts associated with connections.  The debug form of
+  // `ngx_add_timer` logs the file descriptor (`fd`) associated with the
+  // connection associated with the timer event.  However, we use timers that
+  // aren't associated with a connection, and we need the event's data pointer
+  // to refer to our context, the `ngx_curl_t`. Crash! Fortunately,
+  // `ngx_connection_t` also has a data pointer. So, we have our timer event's
+  // data pointer point to a dummy `ngx_connection_t`. We then populate the
+  // connection's `fd` with a clearly-not-real value (`-1`), and we could have
+  // the connection's data pointer refer to `ngx_curl_t`. However, because the
+  // dummy connection is a member of `ngx_curl_t`, we instead ignore the
+  // connection's data pointer and use `offsetof` to get a pointer to the
+  // enclosing `ngx_curl_t`. Whew.
+  curl->dummy_connection.fd = -1;
+  curl->timeout.data = &curl->dummy_connection;
 
   curl->multi = curl_multi_init();
   if (curl->multi == NULL) {
