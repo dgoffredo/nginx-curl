@@ -87,10 +87,35 @@ static void on_done(CURL *handle) {
   curl_easy_cleanup(handle);
 }
 
+static size_t on_read_header(char *data, size_t, size_t length,
+                             void *user_data) {
+  const ngx_curl_allocator_t *allocator = user_data;
+  char *buffer = allocator->callocate(1, length + 1);
+  memcpy(buffer, data, length);
+  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, buffer);
+  allocator->free(buffer);
+  return length;
+}
+
+static size_t on_read_body(char *data, size_t, size_t length, void *user_data) {
+  const ngx_curl_allocator_t *allocator = user_data;
+  char *buffer = allocator->callocate(1, length + 1);
+  memcpy(buffer, data, length);
+  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, buffer);
+  allocator->free(buffer);
+  return length;
+}
+
 static ngx_int_t ngx_curl_example_init_process(ngx_cycle_t *) {
   curl = ngx_create_curl();
   CURL *handle = curl_easy_init();
-  curl_easy_setopt(handle, CURLOPT_URL, "http://www.google.com");
+
+  curl_easy_setopt(handle, CURLOPT_URL, "https://api.ipify.org?format=json");
+  curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, &on_read_header);
+  curl_easy_setopt(handle, CURLOPT_HEADERDATA, ngx_curl_allocator(curl));
+  curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, &on_read_body);
+  curl_easy_setopt(handle, CURLOPT_WRITEDATA, ngx_curl_allocator(curl));
+
   ngx_curl_add_handle(curl, handle, &on_error, &on_done);
   return 0;
 }

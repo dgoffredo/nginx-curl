@@ -60,15 +60,17 @@ ngx_del_connection
 
 typedef struct ngx_curl_s ngx_curl_t;
 
-typedef enum ngx_curl_allocation_policy_e {
-  NGX_CURL_MALLOC_ALLOCATOR,
-  NGX_CURL_POOL_ALLOCATOR
-} ngx_curl_allocation_policy_t;
+typedef struct ngx_curl_allocator_s {
+  void *(*allocate)(size_t size);
+  void *(*callocate)(size_t count, size_t size_each);
+  void *(*reallocate)(void *pointer, size_t new_size);
+  void (*free)(void *pointer);
+  char *(*duplicate)(const char *string);
+} ngx_curl_allocator_t;
 
 ngx_curl_t *ngx_create_curl(void);
 
-ngx_curl_t *
-    ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t);
+ngx_curl_t *ngx_create_curl_with_allocator(const ngx_curl_allocator_t *);
 
 void ngx_destroy_curl(ngx_curl_t *);
 
@@ -77,3 +79,5 @@ ngx_int_t ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
                               void (*on_done)(CURL *));
 
 ngx_int_t ngx_curl_remove_handle(ngx_curl_t *curl, CURL *handle);
+
+const ngx_curl_allocator_t *ngx_curl_allocator(const ngx_curl_t *);

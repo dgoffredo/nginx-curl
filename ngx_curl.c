@@ -10,14 +10,6 @@
 
 // TODO static ngx_curl_pool_t pool = {0};
 
-typedef struct ngx_curl_allocator_s {
-  void *(*allocate)(size_t size);
-  void *(*callocate)(size_t count, size_t size_each);
-  void *(*reallocate)(void *pointer, size_t new_size);
-  void (*free)(void *pointer);
-  char *(*duplicate)(const char *string);
-} ngx_curl_allocator_t;
-
 /*
 TODO
 
@@ -323,22 +315,11 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
 }
 
 ngx_curl_t *ngx_create_curl(void) {
-  return ngx_create_curl_with_allocation_policy(NGX_CURL_MALLOC_ALLOCATOR);
+  return ngx_create_curl_with_allocator(&malloc_allocator);
 }
 
 ngx_curl_t *
-ngx_create_curl_with_allocation_policy(ngx_curl_allocation_policy_t policy) {
-  const ngx_curl_allocator_t *allocator;
-  switch (policy) {
-  case NGX_CURL_MALLOC_ALLOCATOR:
-    allocator = &malloc_allocator;
-    break;
-  default:
-    assert(policy == NGX_CURL_POOL_ALLOCATOR);
-    // TODO allocator = &pool_allocator;
-    allocator = &malloc_allocator; // TODO
-  }
-
+ngx_create_curl_with_allocator(const ngx_curl_allocator_t *allocator) {
   CURLcode rc = curl_global_init_mem(
       CURL_GLOBAL_DEFAULT, allocator->allocate, allocator->free,
       allocator->reallocate, allocator->duplicate, allocator->callocate);
@@ -509,4 +490,9 @@ ngx_int_t ngx_curl_remove_handle(ngx_curl_t *curl, CURL *handle) {
   }
 
   return 0;
+}
+
+const ngx_curl_allocator_t *ngx_curl_allocator(const ngx_curl_t *curl) {
+  assert(curl);
+  return curl->allocator;
 }
