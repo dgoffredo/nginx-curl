@@ -12,9 +12,16 @@ typedef struct ngx_curl_allocator_s {
   char *(*duplicate)(const char *string);
 } ngx_curl_allocator_t;
 
+typedef struct ngx_resolver_s ngx_resolver_t;
+
+typedef struct ngx_curl_options_s {
+  const ngx_curl_allocator_t *allocator;
+  ngx_resolver_t *resolver;
+} ngx_curl_options_t;
+
 ngx_curl_t *ngx_create_curl(void);
 
-ngx_curl_t *ngx_create_curl_with_allocator(const ngx_curl_allocator_t *);
+ngx_curl_t *ngx_create_curl_with_options(const ngx_curl_options_t *);
 
 void ngx_destroy_curl(ngx_curl_t *);
 

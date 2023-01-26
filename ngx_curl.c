@@ -1,6 +1,8 @@
-// nginx headers must go first
+// Nginx headers must go first.  It has something to do with competing
+// preprocessor macros.
 #include <ngx_core.h>
 #include <ngx_event.h>
+#include <ngx_resolver.h>
 
 #include "ngx_curl.h"
 
@@ -55,6 +57,8 @@ static void process_messages(ngx_curl_t *curl) {
       continue;
     }
 
+    // Restore the original user data associated with the handle when it was
+    // added.
     rc = curl_easy_setopt(handle, CURLOPT_PRIVATE, context->user_data);
     if (rc != CURLE_OK) {
       ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: giant burp");
@@ -329,11 +333,45 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
 }
 
 ngx_curl_t *ngx_create_curl(void) {
-  return ngx_create_curl_with_allocator(&malloc_allocator);
+  const ngx_curl_options_t default_options = {
+      // `ngx_create_curl_with_options` will choose defaults for
+      // any options that are NULL.
+      .allocator = NULL,
+      .resolver = NULL};
+  return ngx_create_curl_with_options(&default_options);
 }
 
-ngx_curl_t *
-ngx_create_curl_with_allocator(const ngx_curl_allocator_t *allocator) {
+static ngx_resolver_t *ngx_curl_create_resolver() {
+  // Here's the signature of `ngx_resolver_create`:
+  //
+  //     ngx_resolver_t *
+  //     ngx_resolver_create(ngx_conf_t *cf, ngx_str_t *names, ngx_uint_t n)
+  //
+  // The `ngx_conf_t` argument is only used for its `.pool` argument. So, we
+  // create an `ngx_conf_t` that is zero aside from being populated with
+  // `.pool = ngx_cycle->pool`. The resolver registers its own cleanup handler
+  // with the pool, so it need not be destroyed explicitly. However, it must not
+  // be used after the pool is destroyed. This means that an `ngx_curl_t` must
+  // not be used after the `ngx_cycle_t` in which it was created is destroyed.
+  //
+  // `names` is a list of names used to pre-populate the resolver, and `n` is
+  // the number of names.  We pass no names.
+
+  ngx_conf_t dummy_conf = {0};
+  dummy_conf.pool = ngx_cycle->pool;
+  return ngx_resolver_create(&dummy_conf, NULL, 0);
+}
+
+ngx_curl_t *ngx_create_curl_with_options(const ngx_curl_options_t *options) {
+  const ngx_curl_allocator_t *allocator = options->allocator;
+  if (allocator == NULL) {
+    allocator = &malloc_allocator;
+  }
+  ngx_resolver_t *resolver = options->resolver;
+  if (resolver == NULL) {
+    resolver = ngx_curl_create_resolver();
+  }
+
   CURLcode rc = curl_global_init_mem(
       CURL_GLOBAL_DEFAULT, allocator->allocate, allocator->free,
       allocator->reallocate, allocator->duplicate, allocator->callocate);
@@ -345,6 +383,7 @@ ngx_create_curl_with_allocator(const ngx_curl_allocator_t *allocator) {
 
   ngx_curl_t *curl = allocator->callocate(1, sizeof(ngx_curl_t));
   curl->allocator = allocator;
+  curl->resolver = resolver;
 
   // Initialize the dummy connection.  In debug mode, nginx assumes that the
   // `void *ngx_event_t::data` member of the argument to `ngx_add_timer` points
@@ -353,14 +392,14 @@ ngx_create_curl_with_allocator(const ngx_curl_allocator_t *allocator) {
   // `ngx_add_timer` logs the file descriptor (`fd`) associated with the
   // connection associated with the timer event.  However, we use timers that
   // aren't associated with a connection, and we need the event's data pointer
-  // to refer to our context, the `ngx_curl_t`. Crash! Fortunately,
-  // `ngx_connection_t` also has a data pointer. So, we have our timer event's
-  // data pointer point to a dummy `ngx_connection_t`. We then populate the
-  // connection's `fd` with a clearly-not-real value (`-1`), and we could have
-  // the connection's data pointer refer to `ngx_curl_t`. However, because the
-  // dummy connection is a member of `ngx_curl_t`, we instead ignore the
-  // connection's data pointer and use `offsetof` to get a pointer to the
-  // enclosing `ngx_curl_t`. Whew.
+  // to refer to our context, the `ngx_curl_t`. Crash!
+  //
+  // To work around this, we have our timer event's data pointer point to a
+  // dummy `ngx_connection_t`. We then populate the connection's `fd` with a
+  // clearly-not-real value (`-1`), and we could have the connection's data
+  // pointer refer to `ngx_curl_t`. However, because the dummy connection is a
+  // member of `ngx_curl_t`, we instead ignore the connection's data pointer
+  // and use `offsetof` to get a pointer to the enclosing `ngx_curl_t`.
   curl->dummy_connection.fd = -1;
   curl->timeout.data = &curl->dummy_connection;
 
@@ -411,6 +450,10 @@ void ngx_destroy_curl(ngx_curl_t *curl) {
   curl->allocator->free(curl);
 }
 
+// TODO: Mention in the contract that the CURLOPT_RESOLVE option will be
+// overwritten. Advise to use an explicit IP address in the URL if a
+// pre-resolved name is desired. Or, I suppose, supply a resolver to
+// `ngx_create_curl_with_options` that is pre-populated with names.
 int ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
                         void (*on_error)(CURL *, CURLcode),
                         void (*on_done)(CURL *)) {
@@ -514,36 +557,123 @@ const ngx_curl_allocator_t *ngx_curl_allocator(const ngx_curl_t *curl) {
 /*
 Resolver stuff:
 
-Schemes understood by libcurl, according to:
-https://everything.curl.dev/cmdline/urls/scheme#supported-schemes
-
-dict
-file
-ftp
-ftps
-gopher
-gophers
-* http
-* https
-imap
-imaps
-ldap
-ldaps
-mqtt
-pop3
-pop3s
-rtmp
-rtmps
-rtsp
-scp
-sftp
-smb
-smbs
-smtp
-smtps
-telnet
-tftp
-
 If the scheme is http or https, then use nginx's resolver and add the result as
 an override for either port 80 or 443, respectively.
+
+    if (ngx_strncmp(u.url.data, "http://", 7) == 0) {
+
+BOOOO so complicate!
+
+url -> default port: 80, 443, or -1
+
+If it's -1, then don't bother resolving.
+If it's not -1, then start the resolver game:
+- parse the URL
+- fail? Don't resolve.
+- success? Create the resolve context and set the callback.
+- in the callback:
+    - status/state nonzero? Error, continue without resolving
+    - status/state zero? Convert the resulting address(es) to a format curl
+understands
+    - set the resolver option on the handle
+    - fail? There's probably a deeper issue, but continue anyway
+    - add the handle to the multi handle.
+    - fail? arrange things to call the on_error callback and clean up
+
 */
+
+/* Resolve setup needs:
+  CURL* handle,
+  ngx_curl_handle_context_t *context, (technically redundant because it's in the
+  handle)
+    - need this for error handler, and to restore user data and free on error.
+  ngx_curl_t* (for the multi handle, allocator, and resolver)
+
+  Resolve callback needs:
+  CURL* handle,
+  ngx_curl_handle_context_t *context, (technically redundant because it's in the
+  handle)
+    - need this for error handler, and to restore user data and free on error.
+  ngx_curl_t* (for the multi handle, allocator, and resolver)
+
+  Ok, same stuff.
+*/
+
+typedef struct ngx_curl_resolver_context_s {
+  CURL *handle;
+  ngx_curl_handle_context_t
+      *handle_context; // technically redundant because it's in the handle
+  ngx_curl_t *curl;
+} ngx_curl_resolver_context_t;
+
+static int guess_default_port(const char *url) {
+  assert(url);
+  if (ngx_strncmp(url, "http://", 7) == 0) {
+    return 80;
+  }
+  if (ngx_strncmp(url, "https://", 8) == 0) {
+    return 443;
+  }
+  return -1;
+}
+
+static int resolve(CURL *handle, ngx_curl_handle_context_t *handle_context,
+                   ngx_curl_t *curl) {
+  char *curl_url;
+  CURLcode rc = curl_easy_getinfo(handle, CURLINFO_EFFECTIVE_URL, &curl_url);
+  if (rc != CURLE_OK || url == NULL) {
+    return -1;
+  }
+
+  const int default_port = guess_default_port(url);
+  if (default_port == -1) {
+    return -2;
+  }
+
+  ngx_url_t url = {0};
+  url.url.data = curl_url;
+  url.url.len = strlen(curl_url);
+  url.default_port = (in_port_t)default_port;
+  if (ngx_parse_url(ngx_cycle->pool, &url) != NGX_OK) {
+    return -3;
+  }
+
+  // We have a host and a port. Set up the resolver context (ours and nginx's).
+  assert(curl->allocator);
+  ngx_curl_resolver_context_t *curl_context =
+      curl->allocator->callocate(1, sizeof(ngx_curl_resolver_context_t));
+  curl_context->handle = handle;
+  curl_context->handle_context = handle_context;
+  curl_context->curl = curl;
+
+  ngx_resolver_ctx_t temporary_nginx_context = {0};
+  temporary_nginx_context.name = url.host;
+  assert(curl);
+  assert(curl->resolver);
+  ngx_resolver_t *nginx_context = ngx_resolve_start(curl->resolver);
+  if (nginx_context == NULL) {
+    return -4;
+  }
+  if (nginx_context == NGX_NO_RESOLVER) {
+    return -5;
+  }
+
+  nginx_context->name = url.host;
+  nginx_context->data = curl_context;
+  nginx_context->handler = on_resolve;
+
+  if (ngx_resolve_name(resolve) != NGX_OK) {
+    curl->allocator->free(curl_context);
+    return -6;
+  }
+
+  return 0;
+}
+
+static void on_resolve(ngx_resolver_ctx_t *nginx_context) {
+  assert(nginx_context);
+  ngx_curl_resolver_context_t *curl_context = nginx_context->data;
+  assert(curl_context);
+
+  // TODO
+}
