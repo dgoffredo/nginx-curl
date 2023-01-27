@@ -124,6 +124,8 @@ static size_t on_read_body(char *data, size_t, size_t length, void *user_data) {
   return length;
 }
 
+static ngx_msec_t period = 3 * 1000;
+
 static void make_request(ngx_event_t *) {
   CURL *handle = curl_easy_init();
 
@@ -135,7 +137,7 @@ static void make_request(ngx_event_t *) {
 
   ngx_curl_add_handle(curl, handle, &on_error, &on_done);
 
-  ngx_add_timer(&timer, 500);
+  ngx_add_timer(&timer, period);
 }
 
 static ngx_int_t ngx_curl_example_init_process(ngx_cycle_t *) {
@@ -145,7 +147,7 @@ static ngx_int_t ngx_curl_example_init_process(ngx_cycle_t *) {
   timer.handler = &make_request;
   timer.cancelable = true;
   timer.log = ngx_cycle->log;
-  ngx_add_timer(&timer, 500);
+  ngx_add_timer(&timer, period);
   return 0;
 }
 

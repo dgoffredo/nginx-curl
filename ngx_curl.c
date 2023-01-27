@@ -17,6 +17,7 @@ static const ngx_curl_allocator_t malloc_allocator = {&malloc, &calloc,
 
 struct ngx_curl_s {
   const ngx_curl_allocator_t *allocator;
+  ngx_resolver_t *resolver;
   CURLM *multi;
   ngx_connection_t dummy_connection;
   ngx_event_t timeout;
@@ -29,6 +30,19 @@ typedef struct ngx_curl_handle_context_s {
   // before we replaced it with this object.
   void *user_data;
 } ngx_curl_handle_context_t;
+
+static void process_messages(ngx_curl_t *curl);
+static void on_connection_event(ngx_event_t *event);
+static void on_timeout(ngx_event_t *event);
+static int on_register_timer(CURLM *multi, long timeout_milliseconds,
+                             void *user_data);
+static int on_register_event(CURL *easy, curl_socket_t s, int what,
+                             void *user_data, void *socket_context);
+static ngx_resolver_t *ngx_curl_create_resolver();
+static int guess_default_port(char *url, char **after_scheme);
+static void on_resolve(ngx_resolver_ctx_t *nginx_context);
+static int resolve(CURL *handle, ngx_curl_handle_context_t *handle_context,
+                   ngx_curl_t *curl);
 
 static void process_messages(ngx_curl_t *curl) {
   assert(curl);
@@ -487,6 +501,22 @@ int ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
 
   // TODO: resolve the host in the URL using nginx's async resolver and set the
   // result as CURLOPT_RESOLVE on the handle.
+  //
+  // int resolve(CURL *handle, ngx_curl_handle_context_t *handle_context,
+  // ngx_curl_t *curl)
+  const int resolve_start_rc = resolve(handle, context, curl);
+  // TODO: debugging
+  if (resolve_start_rc) {
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                  "resolve(...) failed with %d", resolve_start_rc);
+    return 0;
+  }
+  // end TODO
+  if (resolve_start_rc == 0) {
+    // The handle will be added to curl->multi later, when the URL's host name
+    // has been resolved by nginx.
+    return 0;
+  }
 
   CURLMcode mrc = curl_multi_add_handle(curl->multi, handle);
   if (mrc != CURLM_OK) {
@@ -606,35 +636,56 @@ typedef struct ngx_curl_resolver_context_s {
   ngx_curl_t *curl;
 } ngx_curl_resolver_context_t;
 
-static int guess_default_port(const char *url) {
+static int guess_default_port(char *url, char **after_scheme) {
   assert(url);
   if (ngx_strncmp(url, "http://", 7) == 0) {
+    *after_scheme = url + 7;
     return 80;
   }
   if (ngx_strncmp(url, "https://", 8) == 0) {
+    *after_scheme = url + 8;
     return 443;
   }
   return -1;
+}
+
+static void on_resolve(ngx_resolver_ctx_t *nginx_context) {
+  assert(nginx_context);
+  ngx_curl_resolver_context_t *curl_context = nginx_context->data;
+  assert(curl_context);
+
+  // TODO
+  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                "TODO: Welcome to the on_resolve handler.");
 }
 
 static int resolve(CURL *handle, ngx_curl_handle_context_t *handle_context,
                    ngx_curl_t *curl) {
   char *curl_url;
   CURLcode rc = curl_easy_getinfo(handle, CURLINFO_EFFECTIVE_URL, &curl_url);
-  if (rc != CURLE_OK || url == NULL) {
+  if (rc != CURLE_OK || curl_url == NULL) {
     return -1;
   }
 
-  const int default_port = guess_default_port(url);
+  // TODO: no
+  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "curl_url = %s", curl_url);
+
+  const int default_port = guess_default_port(curl_url, &curl_url);
   if (default_port == -1) {
     return -2;
   }
 
+  // `guess_default_port` modified `curl_url` via its second argument.
+  // `curl_url` now omits the leading "http://" or "https://".
+
   ngx_url_t url = {0};
-  url.url.data = curl_url;
+  url.url.data = (u_char *)curl_url;
   url.url.len = strlen(curl_url);
   url.default_port = (in_port_t)default_port;
+  url.uri_part = true; // TODO: why?
   if (ngx_parse_url(ngx_cycle->pool, &url) != NGX_OK) {
+    // TODO
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "url.err = %s", url.err);
     return -3;
   }
 
@@ -650,7 +701,8 @@ static int resolve(CURL *handle, ngx_curl_handle_context_t *handle_context,
   temporary_nginx_context.name = url.host;
   assert(curl);
   assert(curl->resolver);
-  ngx_resolver_t *nginx_context = ngx_resolve_start(curl->resolver);
+  ngx_resolver_ctx_t *nginx_context =
+      ngx_resolve_start(curl->resolver, &temporary_nginx_context);
   if (nginx_context == NULL) {
     return -4;
   }
@@ -662,18 +714,10 @@ static int resolve(CURL *handle, ngx_curl_handle_context_t *handle_context,
   nginx_context->data = curl_context;
   nginx_context->handler = on_resolve;
 
-  if (ngx_resolve_name(resolve) != NGX_OK) {
+  if (ngx_resolve_name(nginx_context) != NGX_OK) {
     curl->allocator->free(curl_context);
     return -6;
   }
 
   return 0;
-}
-
-static void on_resolve(ngx_resolver_ctx_t *nginx_context) {
-  assert(nginx_context);
-  ngx_curl_resolver_context_t *curl_context = nginx_context->data;
-  assert(curl_context);
-
-  // TODO
 }
