@@ -159,10 +159,11 @@ static int on_register_timer(CURLM *multi, long timeout_milliseconds,
   // > the timer. All other values are valid expire times in number of
   // > milliseconds.
 
+  if (curl->timeout.timer_set) {
+    ngx_del_timer(&curl->timeout);
+  }
+
   if (timeout_milliseconds == -1) {
-    if (curl->timeout.timer_set) {
-      ngx_del_timer(&curl->timeout);
-    }
     return 0;
   }
 
@@ -171,6 +172,7 @@ static int on_register_timer(CURLM *multi, long timeout_milliseconds,
   curl->timeout.handler = &on_timeout;
   curl->timeout.cancelable =
       true; // otherwise a pending timeout will prevent shutdown
+
   ngx_add_timer(&curl->timeout, timeout_milliseconds);
   return 0;
 }

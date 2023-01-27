@@ -124,7 +124,7 @@ static size_t on_read_body(char *data, size_t, size_t length, void *user_data) {
   return length;
 }
 
-static ngx_msec_t period = 3 * 1000;
+static ngx_msec_t period = 5 * 1000;
 
 static void make_request(ngx_event_t *) {
   CURL *handle = curl_easy_init();
