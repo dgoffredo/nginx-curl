@@ -34,7 +34,7 @@ static void on_connection_event(ngx_event_t *event);
 static void on_timeout(ngx_event_t *event);
 static int on_register_timer(CURLM *multi, long timeout_milliseconds,
                              void *user_data);
-static int on_register_event(CURL *easy, curl_socket_t s, int what,
+static int on_register_event(CURL *handle, curl_socket_t s, int what,
                              void *user_data, void *socket_context);
 
 static void process_messages(ngx_curl_t *curl) {
@@ -53,13 +53,17 @@ static void process_messages(ngx_curl_t *curl) {
     CURL *handle = message->easy_handle;
     CURLMcode mrc = curl_multi_remove_handle(curl->multi, handle);
     if (mrc != CURLM_OK) {
-      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: DERP");
+      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                    "Unable to remove CURL handle from multi-handle: %s",
+                    curl_multi_strerror(mrc));
     }
 
     ngx_curl_handle_context_t *context;
     CURLcode rc = curl_easy_getinfo(handle, CURLINFO_PRIVATE, &context);
     if (rc != CURLE_OK) {
-      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: HERP DERP");
+      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                    "Unable to get private data pointer from CURL handle: %s",
+                    curl_easy_strerror(rc));
       // This is a leak.  What can we do?
       continue;
     }
@@ -68,7 +72,9 @@ static void process_messages(ngx_curl_t *curl) {
     // added.
     rc = curl_easy_setopt(handle, CURLOPT_PRIVATE, context->user_data);
     if (rc != CURLE_OK) {
-      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: giant burp");
+      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                    "Unable to set private pointer of CURL handle: %s",
+                    curl_easy_strerror(rc));
       // This is a leak.  What can we do?
       continue;
     }
@@ -116,7 +122,10 @@ static void on_connection_event(ngx_event_t *event) {
   CURLMcode mrc = curl_multi_socket_action(curl->multi, connection->fd,
                                            ev_bitmask, &num_running_handles);
   if (mrc != CURLM_OK) {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: slurp slurp");
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                  "An error occurred while notifying libcurl of a socket event "
+                  "for file descriptor %d: %s",
+                  connection->fd, curl_multi_strerror(mrc));
   }
 
   process_messages(curl);
@@ -135,7 +144,9 @@ static void on_timeout(ngx_event_t *event) {
   CURLMcode mrc = curl_multi_socket_action(curl->multi, CURL_SOCKET_TIMEOUT, 0,
                                            &num_running_handles);
   if (mrc != CURLM_OK) {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: timurp");
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                  "Error occurred while notifying libcurl of a timeout: %s",
+                  curl_multi_strerror(mrc));
   }
 
   process_messages(curl);
@@ -177,39 +188,14 @@ static int on_register_timer(CURLM *multi, long timeout_milliseconds,
   return 0;
 }
 
-static int call_counter;
-
-static int on_register_event(CURL *easy, curl_socket_t s, int what,
+static int on_register_event(CURL *handle, curl_socket_t s, int what,
                              void *user_data, void *socket_context) {
-  assert(easy);
+  assert(handle);
   assert(user_data);
   ngx_curl_t *curl = user_data;
 
-  // TODO: no
-  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "{{{{{{{{{{ call count %d",
-                call_counter);
-  ++call_counter;
-  switch (what) {
-  case CURL_POLL_IN:
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "[CURL_POLL_IN]");
-    break;
-  case CURL_POLL_OUT:
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "[CURL_POLL_OUT]");
-    break;
-  case CURL_POLL_INOUT:
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "[CURL_POLL_INOUT]");
-    break;
-  case CURL_POLL_REMOVE:
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "[CURL_POLL_REMOVE]");
-    break;
-  }
-
   ngx_connection_t *connection;
   if (socket_context == NULL) {
-    // TODO: no
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-                  "()()()()() No socket context.");
-
     // This socket (`s`) is new to us. Get an nginx connection for it and
     // associate that connection with the socket.
     connection = ngx_get_connection(s, ngx_cycle->log);
@@ -227,22 +213,17 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
     CURLMcode mrc = curl_multi_assign(curl->multi, s, connection);
     if (mrc != CURLM_OK) {
       ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-                    "TODO: why is there so much error handling?");
-      abort(); // TODO
+                    "Error occurred while associating a context object with "
+                    "file descriptor %d in libcurl: %s",
+                    s, curl_multi_strerror(mrc));
       return -1;
     }
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "curl fd: %d nginx fd: %d", s,
-                  connection->fd); // TODO
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-                  "read active? %d write active? %d", connection->read->active,
-                  connection->write->active); // TODO
   } else {
     connection = socket_context;
   }
 
-  // TODO: In debug mode, we're crashing below due to the connection's read
-  // event's `.log` being null.  Does this indicate that the connection
-  // management is borked, or is it ok to just set the loggers here?
+  // In debug mode, we were crashing below due to the connection's read
+  // event's `.log` being null, so we set the loggers here.
   connection->read->log = ngx_cycle->log;
   connection->write->log = ngx_cycle->log;
   ngx_set_connection_log(connection, ngx_cycle->log); // probably unnecessary
@@ -268,13 +249,11 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
     connection->read->handler = &on_connection_event;
     if (!connection->read->active) {
       if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
-        abort(); // TODO
         return -1;
       }
     }
     if (connection->write->active) {
       if (ngx_del_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
-        abort(); // TODO
         return -1;
       }
     }
@@ -283,13 +262,11 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
     connection->write->handler = &on_connection_event;
     if (!connection->write->active) {
       if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
-        abort(); // TODO
         return -1;
       }
     }
     if (connection->read->active) {
       if (ngx_del_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
-        abort(); // TODO
         return -1;
       }
     }
@@ -298,46 +275,36 @@ static int on_register_event(CURL *easy, curl_socket_t s, int what,
     connection->read->handler = &on_connection_event;
     if (!connection->read->active) {
       if (ngx_add_event(connection->read, NGX_READ_EVENT, 0) != NGX_OK) {
-        abort(); // TODO
         return -1;
       }
     }
     connection->write->handler = &on_connection_event;
     if (!connection->write->active) {
       if (ngx_add_event(connection->write, NGX_WRITE_EVENT, 0) != NGX_OK) {
-        abort(); // TODO
         return -1;
       }
     }
     break;
   case CURL_POLL_REMOVE: {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-                  "[][][][][][][] removing..."); // TODO: no
     // Remove the connection from nginx's event loop.
     // Pass zero for the flags so that nginx actually removes the socket from
     // the event loop.
     if (ngx_del_conn(connection, 0) != NGX_OK) {
-      abort(); // TODO
       return -1;
     }
-    ngx_free_connection(connection); // TODO?
+    ngx_free_connection(connection);
 
     // The user data associated with the socket appears to be cleared by
     // libcurl anyway, but let's be explicit with cleanup here.
-    CURLMcode mrc = curl_multi_assign(curl->multi, s, NULL);
-    if (mrc != CURLM_OK) {
-      ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: catch on fire!");
-      abort(); // TODO
-      return -1;
-    }
+    (void)curl_multi_assign(curl->multi, s, NULL);
   } break;
   default:
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: eeeeeeeeeeeeeeeeee!");
-    abort(); // TODO
+    ngx_log_error(
+        NGX_LOG_ERR, ngx_cycle->log, 0,
+        "libcurl requested notification for an unknown event type: %d", what);
     return -1;
   }
 
-  ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "}}}}}}}}}} end call");
   return 0; // success
 }
 
@@ -359,8 +326,9 @@ ngx_curl_t *ngx_create_curl_with_options(const ngx_curl_options_t *options) {
       CURL_GLOBAL_DEFAULT, allocator->allocate, allocator->free,
       allocator->reallocate, allocator->duplicate, allocator->callocate);
   if (rc != CURLE_OK) {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: the horror!");
-    abort(); // TODO
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                  "Unable to perform global initialization of libcurl: %s",
+                  curl_easy_strerror(rc));
     return NULL;
   }
 
@@ -387,10 +355,10 @@ ngx_curl_t *ngx_create_curl_with_options(const ngx_curl_options_t *options) {
 
   curl->multi = curl_multi_init();
   if (curl->multi == NULL) {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: no no no no!");
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                  "Unable to initialize libcurl multi-handle");
     curl_global_cleanup();
     allocator->free(curl);
-    abort(); // TODO
     return NULL;
   }
 
@@ -402,11 +370,13 @@ ngx_curl_t *ngx_create_curl_with_options(const ngx_curl_options_t *options) {
 
   mrc = curl_multi_setopt(curl->multi, CURLMOPT_TIMERDATA, curl);
   if (mrc != CURLM_OK) {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: it isn't right!");
+    ngx_log_error(
+        NGX_LOG_ERR, ngx_cycle->log, 0,
+        "Unable to associate context object with libcurl's timer callback: %s",
+        curl_multi_strerror(mrc));
     curl_multi_cleanup(curl->multi);
     curl_global_cleanup();
     allocator->free(curl);
-    abort(); // TODO
     return NULL;
   }
 
@@ -417,12 +387,13 @@ ngx_curl_t *ngx_create_curl_with_options(const ngx_curl_options_t *options) {
 }
 
 // TODO: Make the contract that `ngx_curl_remove_handle` must have been
-// called for all registered easy handles first.
+// called for all registered handles first.
 void ngx_destroy_curl(ngx_curl_t *curl) {
-  CURLMcode rc = curl_multi_cleanup(curl->multi);
-  if (rc != CURLM_OK) {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: shit!");
-    abort(); // TODO
+  CURLMcode mrc = curl_multi_cleanup(curl->multi);
+  if (mrc != CURLM_OK) {
+    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
+                  "Unable to clean up libcurl multi-handle: %s",
+                  curl_multi_strerror(mrc));
   }
 
   if (curl->timeout.timer_set) {
@@ -450,7 +421,10 @@ int ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
   CURLcode rc =
       curl_easy_getinfo(handle, CURLINFO_PRIVATE, &context->user_data);
   if (rc != CURLE_OK) {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: why? WHY?");
+    ngx_log_error(
+        NGX_LOG_ERR, ngx_cycle->log, 0,
+        "Unable to retrieve private data pointer from CURL handle: %s",
+        curl_easy_strerror(rc));
     curl->allocator->free(context);
     return -1;
   }
@@ -458,14 +432,18 @@ int ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
   rc = curl_easy_setopt(handle, CURLOPT_PRIVATE, context);
   if (rc != CURLE_OK) {
     ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-                  "TODO: deliver us from this evil, Lord");
+                  "Unable to set private data pointer on CURL handle: %s",
+                  curl_easy_strerror(rc));
     curl->allocator->free(context);
     return -2;
   }
 
   CURLMcode mrc = curl_multi_add_handle(curl->multi, handle);
   if (mrc != CURLM_OK) {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: I am a giant egg");
+    ngx_log_error(
+        NGX_LOG_ERR, ngx_cycle->log, 0,
+        "Unable to register CURL handle with libcurl multi-handle: %s",
+        curl_multi_strerror(mrc));
     (void)curl_easy_setopt(handle, CURLOPT_PRIVATE, context->user_data);
     curl->allocator->free(context);
     return -3;
@@ -483,7 +461,10 @@ int ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
   mrc = curl_multi_socket_action(curl->multi, CURL_SOCKET_TIMEOUT, 0,
                                  &num_running_handles);
   if (mrc != CURLM_OK) {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: wahwahwahwahwah");
+    ngx_log_error(
+        NGX_LOG_ERR, ngx_cycle->log, 0,
+        "Unable to notify libcurl of a CURL handle that was added: %s",
+        curl_multi_strerror(mrc));
   }
 
   return 0;
@@ -503,21 +484,28 @@ int ngx_curl_remove_handle(ngx_curl_t *curl, CURL *handle) {
   ngx_curl_handle_context_t *context;
   CURLcode rc = curl_easy_getinfo(handle, CURLINFO_PRIVATE, &context);
   if (rc != CURLE_OK) {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: hurrrrrrrr");
+    ngx_log_error(
+        NGX_LOG_ERR, ngx_cycle->log, 0,
+        "Unable to retrieve private data pointer from CURL handle: %s",
+        curl_easy_strerror(rc));
     return -1;
   }
 
   rc = curl_easy_setopt(handle, CURLOPT_PRIVATE, context->user_data);
   curl->allocator->free(context);
   if (rc != CURLE_OK) {
-    ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0, "TODO: durrrrrrrrrr");
+    ngx_log_error(
+        NGX_LOG_ERR, ngx_cycle->log, 0,
+        "Unable to restore original private data pointer on CURL handle: %s",
+        curl_easy_strerror(rc));
     return -2;
   }
 
   CURLMcode mrc = curl_multi_remove_handle(curl->multi, handle);
   if (mrc != CURLM_OK) {
     ngx_log_error(NGX_LOG_ERR, ngx_cycle->log, 0,
-                  "TODO: shit shit shit shit shit");
+                  "Unable to remove CURL handle from libcurl multi-handle: %s",
+                  curl_multi_strerror(mrc));
     return -3;
   }
 
