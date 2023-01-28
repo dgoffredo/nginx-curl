@@ -386,8 +386,6 @@ ngx_curl_t *ngx_create_curl_with_options(const ngx_curl_options_t *options) {
   return curl;
 }
 
-// TODO: Make the contract that `ngx_curl_remove_handle` must have been
-// called for all registered handles first.
 void ngx_destroy_curl(ngx_curl_t *curl) {
   CURLMcode mrc = curl_multi_cleanup(curl->multi);
   if (mrc != CURLM_OK) {
