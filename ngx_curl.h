@@ -47,11 +47,11 @@
 typedef struct ngx_curl_s ngx_curl_t;
 
 typedef struct ngx_curl_allocator_s {
-  void *(*allocate)(size_t size); // e.g. malloc
-  void *(*callocate)(size_t count, size_t size_each); // e.g. calloc
+  void *(*allocate)(size_t size);                      // e.g. malloc
+  void *(*callocate)(size_t count, size_t size_each);  // e.g. calloc
   void *(*reallocate)(void *pointer, size_t new_size); // e.g. realloc
-  void (*free)(void *pointer); // e.g. free
-  char *(*duplicate)(const char *string); // e.g. strdup
+  void (*free)(void *pointer);                         // e.g. free
+  char *(*duplicate)(const char *string);              // e.g. strdup
 } ngx_curl_allocator_t;
 
 typedef struct ngx_curl_options_s {
