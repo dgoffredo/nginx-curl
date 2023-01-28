@@ -6,7 +6,6 @@ set -e
 example_dir="$(realpath "$(dirname "$0")"/..)"
 cd "$example_dir"
 
-# Make sure that the nginx submodule is cloned.
 if ! [ -d "nginx" ]; then
   curl -s -S -L -o nginx.tar.gz 'https://nginx.org/download/nginx-1.23.3.tar.gz'
   mkdir nginx
