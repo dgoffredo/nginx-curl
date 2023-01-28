@@ -41,6 +41,9 @@
 // first to call one of the `curl_global_init*` family of functions). This
 // library will use the allocator regardless. The default allocator uses the
 // C standard library functions (e.g. `malloc`).
+//
+// The function `ngx_curl_allocator` retrieves the allocator associated with a
+// specified `ngx_curl_t*`.
 
 #include <curl/curl.h>
 
