@@ -14,8 +14,8 @@ nginx's event loop.
 If you're writing an nginx module and want to make requests that are unrelated
 to nginx's request processing, you can use this to make the "extra" requests.
 
-It's a lot easier than using nginx's HTTP facilities directly, but minimizes
-the overhead incurred by using libcurl within nginx.
+It's a lot easier than [using nginx's HTTP facilities directly][3], but
+minimizes the overhead incurred by using libcurl within nginx.
 
 How
 ---
@@ -27,3 +27,4 @@ and on libcurl.
 
 [1]: https://curl.se/libcurl/
 [2]: http://nginx.org/en/docs/dev/development_guide.html#Modules
+[3]: http://nginx.org/en/docs/dev/development_guide.html#http_requests_to_ext
