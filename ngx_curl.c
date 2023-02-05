@@ -399,6 +399,7 @@ void ngx_destroy_curl(ngx_curl_t *curl) {
   }
 
   curl->allocator->free(curl);
+  curl_global_cleanup();
 }
 
 int ngx_curl_add_handle(ngx_curl_t *curl, CURL *handle,
